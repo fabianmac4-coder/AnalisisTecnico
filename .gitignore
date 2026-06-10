@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Editores / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Entorno (NUNCA versionar credenciales/secretos)
+.env
+.env.local
+
+# CA bundle generado para redes con proxy TLS
+.certs/
+
+# Claude Code (config local)
+.claude/

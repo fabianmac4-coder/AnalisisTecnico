@@ -1,0 +1,81 @@
+"""Punto de entrada de la API FastAPI."""
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.ca_bundle import ensure_ca_bundle
+
+# Configura el CA bundle del sistema (redes con proxy TLS) antes de usar yfinance.
+ensure_ca_bundle()
+
+from fastapi import Depends, HTTPException  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+
+from app.config import env_settings, settings  # noqa: E402
+from app.database import get_db  # noqa: E402
+from app.routers import (  # noqa: E402
+    actions,
+    admin_users,
+    auth,
+    catalog,
+    drawings,
+    indicators,
+    layouts,
+    market,
+    symbols,
+)
+from app.schemas.market import HealthResponse  # noqa: E402
+from app.security.dependencies import get_current_active_user  # noqa: E402
+
+app = FastAPI(title=settings.app_name)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+prefix = settings.api_prefix
+
+
+@app.get(f"{prefix}/health", response_model=HealthResponse, tags=["health"])
+def health() -> HealthResponse:
+    return HealthResponse(status="ok", app=settings.app_name)
+
+
+@app.get(f"{prefix}/health/db", tags=["health"])
+def health_db(db: Session = Depends(get_db)) -> dict:
+    """Verifica la conexion a SQL Server (sin exponer credenciales)."""
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 - error limpio, sin secretos
+        raise HTTPException(
+            status_code=503,
+            detail=f"No se pudo conectar a la base de datos: {type(exc).__name__}",
+        ) from exc
+    return {
+        "status": "ok",
+        "database": env_settings.DB_NAME,
+        "server": env_settings.DB_SERVER,
+    }
+
+
+# ===== Publicos: health, login, set-password =====
+app.include_router(auth.router, prefix=prefix)
+
+# ===== Protegidos: requieren Bearer token de usuario activo =====
+_auth_required = [Depends(get_current_active_user)]
+app.include_router(market.router, prefix=prefix, dependencies=_auth_required)
+app.include_router(symbols.router, prefix=prefix, dependencies=_auth_required)
+app.include_router(catalog.router, prefix=prefix)  # usa el usuario en handlers
+app.include_router(drawings.router, prefix=prefix)
+app.include_router(layouts.router, prefix=prefix)
+app.include_router(indicators.router, prefix=prefix)
+app.include_router(actions.router, prefix=prefix)
+
+# ===== Solo administradores =====
+app.include_router(admin_users.router, prefix=prefix)
