@@ -18,12 +18,17 @@ from app.database import get_db  # noqa: E402
 from app.routers import (  # noqa: E402
     actions,
     admin_users,
+    ai_chat,
     auth,
     catalog,
+    chatgpt_context,
     drawings,
     indicators,
     layouts,
     market,
+    market_movers,
+    noticias,
+    operaciones_simuladas,
     symbols,
 )
 from app.schemas.market import HealthResponse  # noqa: E402
@@ -76,6 +81,11 @@ app.include_router(drawings.router, prefix=prefix)
 app.include_router(layouts.router, prefix=prefix)
 app.include_router(indicators.router, prefix=prefix)
 app.include_router(actions.router, prefix=prefix)
+app.include_router(ai_chat.router, prefix=prefix)  # chat de IA (auth en handlers)
+app.include_router(chatgpt_context.router, prefix=prefix)  # contexto ChatGPT iframe
+app.include_router(operaciones_simuladas.router, prefix=prefix)  # paper trading
+app.include_router(noticias.router, prefix=prefix)  # noticias (cache SQL)
+app.include_router(market_movers.router, prefix=prefix)  # movers (cache SQL)
 
 # ===== Solo administradores =====
 app.include_router(admin_users.router, prefix=prefix)

@@ -18,8 +18,8 @@ export const marketDataService = {
   },
 
   /** Cotizacion canonica (precio actual) del simbolo. */
-  async getQuote(symbol: string): Promise<QuoteResponse> {
-    return apiClient.getQuote(symbol);
+  async getQuote(symbol: string, forceRefresh = false): Promise<QuoteResponse> {
+    return apiClient.getQuote(symbol, { forceRefresh });
   },
 
   /**
@@ -27,11 +27,16 @@ export const marketDataService = {
    * (Promise.allSettled): se cumple el criterio de "fallo parcial".
    * Pide warmup (velas previas ocultas) para que indicadores como SMA 200
    * salgan completos en cada temporalidad.
+   * forceRefresh ignora el cache del backend (boton/auto-refresh).
    */
-  async loadAllPresets(symbol: string): Promise<PresetLoadResult[]> {
+  async loadAllPresets(symbol: string, forceRefresh = false): Promise<PresetLoadResult[]> {
     const settled = await Promise.allSettled(
       PRESET_KEYS.map((preset) =>
-        apiClient.getOHLCV(symbol, preset, { includeWarmup: true, warmupBars: 260 })
+        apiClient.getOHLCV(symbol, preset, {
+          includeWarmup: true,
+          warmupBars: 260,
+          forceRefresh,
+        })
       )
     );
     return settled.map((result, i) => {

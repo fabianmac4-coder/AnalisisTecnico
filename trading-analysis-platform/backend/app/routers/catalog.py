@@ -127,11 +127,51 @@ def update_catalog_entry(
     return _to_out(entry, accion)
 
 
+class FavoriteUpdate(BaseModel):
+    favorito: bool
+
+
+class FavoriteOut(BaseModel):
+    c010Id: int
+    ticker: str
+    favorito: bool
+
+
+@router.patch("/{c010_id}/favorite", response_model=FavoriteOut)
+def set_favorite(
+    c010_id: int,
+    payload: FavoriteUpdate,
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(get_current_active_user),
+) -> FavoriteOut:
+    """Estrella de favorito: persiste C040.Favorito del usuario actual."""
+    repo = CatalogoRepository(db)
+    accion = AccionesRepository(db).get_by_id(c010_id)
+    if accion is None:
+        raise HTTPException(status_code=404, detail="Acción no encontrada")
+    entry = repo.get_entry(user.C005Id, c010_id)
+    if entry is None:
+        # Crea la fila de catálogo si aún no existe (caso poco común).
+        entry = repo.add_or_update_action_for_user(
+            user.C005Id, c010_id, favorito=payload.favorito
+        )
+    else:
+        repo.update_favorite(user.C005Id, c010_id, payload.favorito)
+    db.commit()
+    return FavoriteOut(
+        c010Id=c010_id, ticker=accion.Ticker, favorito=bool(entry.Favorito)
+    )
+
+
 @router.delete("/{c010_id}", status_code=204)
 def remove_from_catalog(
     c010_id: int,
     db: Session = Depends(get_db),
     user: Usuario = Depends(get_current_active_user),
 ) -> None:
+    """Quita del watchlist SOLO para este usuario: C040.Activo=0.
+
+    JAMÁS borra la acción maestra (C010) ni dibujos/indicadores/chats.
+    """
     CatalogoRepository(db).deactivate_from_catalog(user.C005Id, c010_id)
     db.commit()

@@ -72,6 +72,46 @@ class AppEnvSettings(BaseSettings):
     SMTP_FROM_NAME: str = "Trading Analysis Platform"
     SMTP_FROM_EMAIL: str = ""
 
+    # OpenAI (chat de IA; vacio => el chat responde 503 "IA no disponible")
+    # La clave SOLO vive en el backend: nunca se envia ni loguea.
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-5.2"
+    OPENAI_TEMPERATURE: float = 0.3
+    OPENAI_MAX_OUTPUT_TOKENS: int = 1200
+    OPENAI_ENABLE_STREAMING: bool = True
+    OPENAI_TIMEOUT_SECONDS: float = 60.0
+
+    # Limites del chat de IA (costo / abuso)
+    AI_CHAT_MAX_MESSAGES_PER_MINUTE: int = 10
+    AI_CHAT_MAX_CONTEXT_MESSAGES: int = 20
+    AI_CHAT_MAX_DRAWINGS_CONTEXT: int = 50
+    AI_CHAT_MAX_NEWS_ITEMS: int = 5
+
+    # Noticias y market movers (cache en SQL con TTL corto)
+    ENABLE_YAHOO_NEWS_PROVIDER: bool = True
+    ENABLE_GOOGLE_NEWS_PROVIDER: bool = True
+    GOOGLE_NEWS_REGION: str = "US"
+    GOOGLE_NEWS_LANGUAGE: str = "en"
+    GOOGLE_NEWS_TIMEOUT_SECONDS: float = 10.0
+    GOOGLE_NEWS_GLOBAL_QUERY: str = (
+        '"stock market" OR "Federal Reserve" OR inflation OR geopolitics '
+        'OR Nasdaq OR "S&P 500"'
+    )
+    NEWS_SYMBOL_TTL_MINUTES: int = 5
+    NEWS_GLOBAL_TTL_MINUTES: int = 5
+    MARKET_MOVERS_TTL_MINUTES: int = 5
+    NEWS_MAX_ITEMS_PER_PROVIDER: int = 50
+    NEWS_CLEANUP_DAYS: int = 30
+    MARKET_MOVERS_CLEANUP_DAYS: int = 7
+
+    # Top Trending Stocks Today + agregacion global
+    NEWS_TRENDING_STOCKS_TTL_MINUTES: int = 5
+    NEWS_TRENDING_STOCKS_MAX_TICKERS: int = 20
+    NEWS_TRENDING_STOCKS_NEWS_PER_TICKER: int = 3
+    NEWS_GLOBAL_QUERY_LIMIT_PER_QUERY: int = 10
+    NEWS_GLOBAL_MAX_QUERIES_PER_REFRESH: int = 20
+    NEWS_DEBUG: bool = False
+
     @property
     def database_url(self) -> str:
         """URL de SQLAlchemy construida de forma segura (el server lleva `\\`)."""

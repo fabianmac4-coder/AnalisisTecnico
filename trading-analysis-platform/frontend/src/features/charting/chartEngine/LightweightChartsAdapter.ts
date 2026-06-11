@@ -41,6 +41,8 @@ interface ChartHandle {
   // Cambio diario de la cotizacion: decide el color (verde/rojo/neutro).
   canonicalChange: number | null;
   priceLine?: IPriceLine;
+  // Lineas de entradas simuladas (paper trading) sobre la serie principal.
+  entryLineRefs?: IPriceLine[];
   // Tiempos futuros (ms) anexados como whitespace tras el ultimo bar real.
   futureTimesMs: number[];
   // Estilo del histograma de volumen (colores por direccion + opacidad).
@@ -318,6 +320,27 @@ export class LightweightChartsAdapter implements ChartEngineAdapter {
         handle.canonicalPrice = price;
         handle.canonicalChange = change;
         applyCanonicalPriceLine(handle);
+      },
+      setSimulatedEntryLines: (lines) => {
+        // Quita las lineas previas (try/catch: la serie pudo recrearse al
+        // cambiar el tipo de grafica y las refs viejas ya no existen).
+        for (const ref of handle.entryLineRefs ?? []) {
+          try {
+            handle.mainSeries.removePriceLine(ref);
+          } catch {
+            /* serie recreada */
+          }
+        }
+        handle.entryLineRefs = lines.map((l) =>
+          handle.mainSeries.createPriceLine({
+            price: l.price,
+            color: l.color || "#22c55e",
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: l.title || "Sim Entry",
+          })
+        );
       },
     };
   }

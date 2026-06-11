@@ -38,7 +38,14 @@ interface ChartState {
   quoteErrorBySymbol: Record<string, string>;
 
   loadAllPresets: (symbol: string) => Promise<void>;
-  loadQuote: (symbol: string) => Promise<void>;
+  /**
+   * Recarga NO destructiva (boton/auto-refresh): fuerza datos frescos del
+   * backend pero conserva las velas actuales en pantalla mientras carga y
+   * mantiene las viejas si una temporalidad falla. Devuelve true si al menos
+   * una temporalidad o la cotizacion se actualizo.
+   */
+  refreshAllPresets: (symbol: string) => Promise<boolean>;
+  loadQuote: (symbol: string, forceRefresh?: boolean) => Promise<void>;
   setChartType: (preset: PresetKey, chartType: ChartType) => void;
   setChartTypeAll: (chartType: ChartType) => void;
   hydrateChartTypes: () => Promise<void>;
@@ -55,14 +62,14 @@ export const useChartStore = create<ChartState>((set, get) => ({
   quoteLoadingBySymbol: {},
   quoteErrorBySymbol: {},
 
-  async loadQuote(symbol) {
+  async loadQuote(symbol, forceRefresh = false) {
     symbol = symbol.toUpperCase();
     set({
       quoteLoadingBySymbol: { ...get().quoteLoadingBySymbol, [symbol]: true },
       quoteErrorBySymbol: { ...get().quoteErrorBySymbol, [symbol]: "" },
     });
     try {
-      const quote = await marketDataService.getQuote(symbol);
+      const quote = await marketDataService.getQuote(symbol, forceRefresh);
       set({
         quoteBySymbol: { ...get().quoteBySymbol, [symbol]: quote },
         quoteLoadingBySymbol: { ...get().quoteLoadingBySymbol, [symbol]: false },
@@ -106,6 +113,33 @@ export const useChartStore = create<ChartState>((set, get) => ({
       if (r.error) errors[r.preset] = r.error;
     }
     set({ chartDataByPreset: data, errorByPreset: errors, loadingByPreset: loading });
+  },
+
+  async refreshAllPresets(symbol) {
+    symbol = symbol.toUpperCase();
+    // NO se limpia chartDataByPreset: las graficas siguen visibles mientras
+    // llegan los datos frescos (forceRefresh ignora el cache del backend).
+    await get().loadQuote(symbol, true);
+    const quoteOk = !get().quoteErrorBySymbol[symbol];
+
+    const results = await marketDataService.loadAllPresets(symbol, true);
+
+    // Si el usuario cambio de simbolo mientras refrescabamos, ignoramos.
+    if (get().activeSymbol !== symbol) return false;
+
+    const data = { ...get().chartDataByPreset };
+    const errors: ByPreset<string> = {};
+    let updated = 0;
+    for (const r of results) {
+      if (r.data) {
+        data[r.preset] = r.data; // reemplaza solo lo que llego bien
+        updated += 1;
+      } else if (r.error) {
+        errors[r.preset] = r.error; // conserva las velas viejas de ese panel
+      }
+    }
+    set({ chartDataByPreset: data, errorByPreset: errors });
+    return updated > 0 || quoteOk;
   },
 
   setChartType(preset, chartType) {

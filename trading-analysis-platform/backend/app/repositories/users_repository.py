@@ -7,8 +7,11 @@ from sqlalchemy.orm import Session
 from app.models import (
     AnalisisDibujo,
     CatalogoUsuarioAccion,
+    ChatConversacion,
+    ChatMensaje,
     IndicadorConfiguracion,
     LayoutGrafica,
+    OperacionSimulada,
     PasswordToken,
     Usuario,
 )
@@ -104,7 +107,17 @@ class UsersRepository:
         transaccion completa (rollback si algo falla).
         """
         user_id = user.C005Id
+        # 1) Mensajes de IA (C111) de las conversaciones del usuario.
+        user_conversations = select(ChatConversacion.C110Id).where(
+            ChatConversacion.C005Id == user_id
+        )
+        self.db.execute(
+            delete(ChatMensaje).where(ChatMensaje.C110Id.in_(user_conversations))
+        )
+        # 2) Conversaciones de IA (C110) y demas tablas hijas.
         for model in (
+            ChatConversacion,
+            OperacionSimulada,
             PasswordToken,
             AnalisisDibujo,
             IndicadorConfiguracion,

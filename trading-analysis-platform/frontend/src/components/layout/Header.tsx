@@ -1,5 +1,9 @@
 import { Link, useNavigate } from "react-router-dom";
 import { SymbolSearch } from "@/features/symbols/SymbolSearch";
+import { AiChatButton } from "@/features/aiChat/AiChatButton";
+import { ChatGptIframeButton } from "@/features/chatgptIframe/ChatGptIframeButton";
+import { RefreshButton } from "@/features/refresh/RefreshButton";
+import { AutoRefreshMenu } from "@/features/refresh/AutoRefreshMenu";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -62,6 +66,26 @@ export function Header() {
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        <Link
+          to="/news"
+          data-testid="news-link"
+          title="Noticias de mercado y geopolítica"
+          className="rounded-full border border-edge bg-panel-2 px-3 py-1 text-[11px] text-gray-200 hover:bg-panel-3"
+        >
+          📰 Noticias
+        </Link>
+        <Link
+          to="/market-movers"
+          data-testid="movers-link"
+          title="Tendencia, subidas, caídas y más activas"
+          className="rounded-full border border-edge bg-panel-2 px-3 py-1 text-[11px] text-gray-200 hover:bg-panel-3"
+        >
+          🚀 Movers
+        </Link>
+        <RefreshButton />
+        <AutoRefreshMenu />
+        <AiChatButton />
+        <ChatGptIframeButton />
         {authUser?.esAdmin && (
           <Link
             to="/admin/users"

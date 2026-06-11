@@ -43,6 +43,16 @@ define su contraseña mediante un **enlace enviado por correo**.
   en SQL Server, panel de **administración de usuarios** (`/admin/users`) y
   alta de contraseñas vía **enlace de correo de un solo uso** (nunca se envían
   contraseñas en texto plano).
+- ✨ **AI Chat por ticker** (OpenAI): panel lateral para conversar sobre el
+  instrumento activo usando el contexto real de la plataforma (precio, OHLCV,
+  indicadores, **tus dibujos**, watchlist y noticias). Historial guardado por
+  usuario y acción en SQL (`C110`/`C111`).
+- 🤖 **Modo ChatGPT (iframe/helper)**: alternativa SIN API — genera un prompt
+  detallado con el contexto del ticker (precio, indicadores, dibujos, notas y
+  favorito del watchlist), lo copias y usas tu propia sesión de ChatGPT
+  (iframe o pestaña nueva). No guarda nada en la plataforma.
+  > Las respuestas de la IA son análisis informativo; **no son asesoría
+  > financiera**.
 
 ## Estructura
 
@@ -115,6 +125,18 @@ SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=
 APP_ENV=development
+
+# OpenAI (AI Chat). Vacío => el chat muestra "IA no disponible" sin romper nada.
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.2
+OPENAI_TEMPERATURE=0.3
+OPENAI_MAX_OUTPUT_TOKENS=1200
+
+# Límites del AI Chat (costo/abuso)
+AI_CHAT_MAX_MESSAGES_PER_MINUTE=10
+AI_CHAT_MAX_CONTEXT_MESSAGES=20
+AI_CHAT_MAX_DRAWINGS_CONTEXT=50
+AI_CHAT_MAX_NEWS_ITEMS=5
 ```
 
 `.env` está en `.gitignore`: no se versiona.
@@ -128,6 +150,8 @@ Los scripts de `backend/sql/` son **idempotentes** (se pueden re-ejecutar):
   (`NombreNormalizado`, `Email`, ticker+fuente, layout por usuario+acción).
 - `002_password_tokens.sql` — crea `dbo.C006` (tokens de contraseña: solo se
   guarda el **hash** del token, nunca el token en claro).
+- `004_ai_chat.sql` — crea `dbo.C110` (ChatConversaciones) y `dbo.C111`
+  (ChatMensajes) para el AI Chat, con FKs a `C005`/`C010` e índices.
 
 ```powershell
 cd backend
@@ -225,6 +249,175 @@ Este flujo **nunca crea usuarios**.
 - **Cambio forzado**: si `DebeCambiarPassword=1` el login SÍ funciona, pero la
   app bloquea todas las rutas y redirige a `/change-password` ("Debes cambiar
   tu contraseña temporal antes de continuar") hasta definir una nueva.
+
+### AI Chat (asistente de análisis por ticker)
+
+1. Pega tu clave de OpenAI en `backend/.env` → `OPENAI_API_KEY=sk-...` y
+   reinicia el backend. **La clave solo vive en el backend**: el frontend
+   jamás la ve, y sin clave el chat muestra un error limpio sin romper la app.
+2. Con un ticker activo (p. ej. AAPL), pulsa **✨ AI Chat** en el header: se
+   abre un panel lateral acotado a ese símbolo.
+3. La IA recibe contexto real de la plataforma según los toggles del panel:
+   **Gráfica** (precio canónico + resumen diario 1Y), **Dibujos** (tus líneas
+   con sus puntos tiempo/precio), **Indicadores** (configs + SMA/EMA/RSI
+   actuales) y **Noticias** (best-effort vía yfinance; si no hay, la IA lo
+   dice en lugar de inventar).
+4. Las conversaciones se guardan por **usuario + acción** (`C110`/`C111`):
+   al volver a AAPL reaparece tu conversación; al cambiar a MSFT ves solo las
+   de MSFT. Renombrar (✎) y borrar (🗑, borrado suave) desde la lista 🗂.
+5. Límites de seguridad/costo: máx. `AI_CHAT_MAX_MESSAGES_PER_MINUTE`
+   mensajes/minuto por usuario (429 al excederlo), historial acotado a
+   `AI_CHAT_MAX_CONTEXT_MESSAGES` mensajes y contexto resumido (máx. 50
+   dibujos / 5 noticias). El contexto **nunca** incluye `PasswordHash`,
+   tokens ni datos de otros usuarios.
+
+> **Las respuestas de la IA son análisis informativo, no asesoría
+> financiera.** El asistente habla de escenarios alcistas/bajistas, zonas de
+> riesgo e invalidación; nunca da órdenes de compra/venta.
+
+### Modo ChatGPT (iframe/helper) — sin API
+
+Botón **🤖 ChatGPT** en el header (junto a ✨ AI Chat). Diferencias clave:
+
+| | ✨ AI Chat | 🤖 ChatGPT |
+| --- | --- | --- |
+| Motor | API de OpenAI (backend) | Tu sesión de ChatGPT en el navegador |
+| Historial | Guardado en SQL (`C110`/`C111`) | Solo en tu cuenta de ChatGPT |
+| Costo | Consume tu crédito de API | Tu plan de ChatGPT |
+
+Flujo: el panel genera un **prompt** con el contexto real del ticker
+(`GET /api/chatgpt/context` — autenticado, no llama a OpenAI ni escribe en
+SQL): precio, indicadores actuales, tus dibujos, favorito/tags/notas del
+watchlist y temporalidades. Eliges el tipo de prompt (análisis técnico,
+escenarios, riesgo, soportes/resistencias, revisión de dibujos…), ajustas los
+toggles y pulsas "**Copiar prompt y abrir ChatGPT en pestaña nueva**": copia
+el prompt y abre tu sesión de ChatGPT; ahí lo pegas (Ctrl+V).
+
+> **Por qué no hay iframe**: chatgpt.com rechaza cargarse dentro de otras
+> páginas (X-Frame-Options/CSP de OpenAI). No es un fallo de la plataforma y
+> no se puede saltar. Por eso el panel muestra la guía del flujo en lugar de
+> un iframe roto; `VITE_ENABLE_CHATGPT_IFRAME=true` reactiva el intento de
+> iframe solo si configuras una URL que sí permita embebido.
+
+La app jamás lee, controla ni guarda lo que pasa dentro de ChatGPT.
+
+Variables del frontend (`frontend/.env.local`, opcionales):
+
+```ini
+VITE_CHATGPT_IFRAME_URL=https://chatgpt.com/
+VITE_ENABLE_CHATGPT_IFRAME=false
+VITE_CHATGPT_IFRAME_FALLBACK_NEW_TAB=true
+```
+
+### Noticias y Market Movers
+
+- **📰 Noticias** (`/news`): titulares globales de mercado/geopolítica (Fed,
+  inflación, tecnología, IA, semiconductores, energía…) con filtros por
+  categoría (clasificación por palabras clave en el backend), fuente, hora y
+  link externo. **Panel compacto por ticker** en el sidebar ("Noticias AAPL")
+  que se carga sin bloquear las gráficas. Los titulares también alimentan el
+  contexto del AI Chat y el prompt de ChatGPT (máx. 5, sin inventar noticias).
+- **🚀 Market Movers** (`/market-movers`): Tendencia, Mayores subidas,
+  Mayores caídas y Más activas (screeners de Yahoo), con precio/cambio %/
+  volumen/market cap; clic en el ticker abre las gráficas y `＋☆` lo agrega
+  al watchlist.
+- **Arquitectura**: el frontend JAMÁS llama a proveedores externos — el
+  backend consulta providers detrás de una interfaz común
+  (`YahooNewsProvider`, `GoogleNewsProvider` vía RSS; fácil agregar
+  NewsAPI/GNews/Finnhub después) y **cachea en SQL** (`C060`-`C063`) con TTL
+  corto (noticias por ticker 5 min, globales 10 min, movers 5 min;
+  configurables). `forceRefresh=true` ignora el TTL. Si un proveedor falla,
+  se sirve el cache con un aviso — nunca se pierde lo que ya había.
+- Limpieza: `NoticiasRepository.cleanup_old_news` (30 días) y
+  `MarketMoversRepository.cleanup_old_snapshots` (7 días).
+
+Variables opcionales del backend (`.env`):
+
+```ini
+ENABLE_YAHOO_NEWS_PROVIDER=true
+ENABLE_GOOGLE_NEWS_PROVIDER=true
+GOOGLE_NEWS_REGION=US
+GOOGLE_NEWS_LANGUAGE=en
+GOOGLE_NEWS_TIMEOUT_SECONDS=10
+NEWS_SYMBOL_TTL_MINUTES=5
+NEWS_GLOBAL_TTL_MINUTES=10
+MARKET_MOVERS_TTL_MINUTES=5
+NEWS_MAX_ITEMS_PER_PROVIDER=50
+NEWS_CLEANUP_DAYS=30
+MARKET_MOVERS_CLEANUP_DAYS=7
+```
+
+> Los proveedores externos son best-effort y están aislados: pueden fallar o
+> devolver vacío ocasionalmente sin romper la app.
+
+**Mejoras de robustez**: las noticias globales agregan SEIS fuentes (Yahoo
+Finance Latest/Top/Trending vía RSS + Google News con grupos de consultas de
+mercado, geopolítica/política y acciones en movimiento). La categoría
+**Geopolitics / Policy** ahora captura titulares políticos que mueven mercado
+(Trump, tarifas, trade deals, shutdown, sanciones, regulación…). La sección
+**🔥 Top Trending Stocks Today** en `/news` muestra qué acciones se mueven hoy
+y por qué (endpoint propio con TTL de 5 min y badges de tickers conocidos que
+abren la gráfica). Filtro por fuente (Todas/Yahoo/Google) y dedupe por URL
+normalizada (sin parámetros de tracking).
+
+### Dibujos editables y canal auto-detectado
+
+- **Mover/ajustar líneas**: con el **Cursor**, selecciona una línea y
+  arrástrala completa (conserva la pendiente) o arrastra una de sus manijas
+  para cambiar el extremo/pendiente. Se guarda en SQL al soltar y se refleja
+  en las seis gráficas; Escape cancela; los dibujos **bloqueados** no se
+  mueven (HTTP 423).
+- **Canal R/R automático**: el sistema detecta solo los pares de líneas
+  ~paralelas (Free Line/trendline), decide cuál es superior/inferior por
+  precio, valida ancho y que el precio esté dentro, y muestra el ratio en un
+  **badge en cada gráfica** ("Canal R/R 2.68 : 1") y en el panel lateral con
+  su confianza. La selección manual queda como respaldo colapsado. El
+  resultado (con confianza) viaja a los prompts de IA. Hipotético, no
+  asesoría financiera.
+
+### Refresh manual y auto-refresh
+
+- **⟳ Refresh** (header): recarga el ticker activo con datos frescos de Yahoo
+  (`forceRefresh=true` ignora el cache del backend): las seis temporalidades,
+  la cotización canónica, los indicadores y el rendimiento de las entradas
+  simuladas. **No destructivo**: las gráficas siguen visibles mientras carga,
+  los dibujos/zoom/paneles se conservan y, si una temporalidad falla, se
+  mantienen sus velas anteriores.
+- **⏱ Auto refresh** (menú): intervalos de **5 / 10 / 15 / 20 min** con
+  comportamiento de radio (solo uno activo; re-clic en el activo lo apaga;
+  ninguno = Off). La preferencia persiste en localStorage
+  (`tradingPlatform.autoRefreshIntervalMinutes`). Mínimo 5 min para no
+  saturar Yahoo; con la pestaña oculta los ticks se saltan y al volver se
+  refresca una vez solo si ya pasó el intervalo. El menú muestra la hora del
+  último refresh.
+
+### Entradas simuladas (paper trading) y R/R de canal
+
+- **Entradas simuladas** (`dbo.C050`, panel "Entradas simuladas" del sidebar):
+  marca *"hipotéticamente entré aquí"* con precio/tipo (LONG/SHORT)/cantidad/
+  notas/color. Se dibujan como línea punteada al precio de entrada en las seis
+  gráficas, persisten en SQL y el panel muestra P/L no realizado (%, monto y
+  días desde la entrada) con el precio canónico actual. Acciones: cerrar (P/L
+  realizado con precio de salida), ocultar/mostrar, eliminar (borrado suave
+  `Activo=0`). Quitar el ticker del watchlist NO borra las entradas.
+- **R/R de canal** (panel "R/R de canal"): selecciona DOS Free Lines como
+  canal superior/inferior (con intercambio automático/manual) y una referencia
+  (precio actual o entrada simulada); calcula beneficio/riesgo potencial y el
+  ratio (p. ej. `2.68 : 1`) por interpolación/extrapolación lineal de tus
+  líneas (tiempos en ms). Botón para copiar el resumen.
+- **Integración con IA**: el AI Chat y el generador de prompts de ChatGPT
+  incluyen automáticamente tus entradas simuladas y el último R/R de canal
+  calculado. Todo es **análisis hipotético, no asesoría financiera**.
+
+### Watchlist: quitar con confirmación y favoritos reales
+
+- **Quitar un ticker** pide confirmación y solo desactiva TU fila de `C040`
+  (`Activo=0`). **Nunca** borra la acción maestra (`C010`) ni tus dibujos,
+  indicadores, layouts o chats de IA.
+- **La estrella ★ es `C040.Favorito` real**: persiste tras refrescar, ordena
+  los favoritos primero (`Favorito DESC, UltimaConsulta DESC, Ticker ASC`) y
+  hay filtro "Solo favoritos" en el sidebar. Endpoint dedicado:
+  `PATCH /api/catalog/{c010Id}/favorite`.
 
 ### Acciones de administración de usuarios
 

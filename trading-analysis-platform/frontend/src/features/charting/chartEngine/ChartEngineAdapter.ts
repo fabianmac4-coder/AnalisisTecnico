@@ -58,6 +58,13 @@ export interface ChartInstance {
    * decide el color: verde si sube, rojo si baja, gris neutro si 0/desconocido.
    */
   setCanonicalPriceLine(price: number | null, change?: number | null): void;
+  /**
+   * Lineas de precio de ENTRADAS SIMULADAS (paper trading) del simbolo activo.
+   * Opcional para no romper ChartInstance falsos en tests.
+   */
+  setSimulatedEntryLines?(
+    lines: Array<{ price: number; color?: string | null; title?: string | null }>
+  ): void;
 }
 
 export interface ChartEngineAdapter {

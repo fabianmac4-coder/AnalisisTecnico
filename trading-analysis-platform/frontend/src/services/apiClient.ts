@@ -120,18 +120,20 @@ export const apiClient = {
   getOHLCV(
     symbol: string,
     preset: PresetKey,
-    opts?: { includeWarmup?: boolean; warmupBars?: number }
+    opts?: { includeWarmup?: boolean; warmupBars?: number; forceRefresh?: boolean }
   ): Promise<OHLCVResponse> {
     const q = new URLSearchParams({ symbol, preset });
     if (opts?.includeWarmup) {
       q.set("includeWarmup", "true");
       q.set("warmupBars", String(opts.warmupBars ?? 260));
     }
+    if (opts?.forceRefresh) q.set("forceRefresh", "true");
     return request<OHLCVResponse>(`/market/ohlcv?${q.toString()}`);
   },
 
-  getQuote(symbol: string): Promise<QuoteResponse> {
+  getQuote(symbol: string, opts?: { forceRefresh?: boolean }): Promise<QuoteResponse> {
     const q = new URLSearchParams({ symbol });
+    if (opts?.forceRefresh) q.set("forceRefresh", "true");
     return request<QuoteResponse>(`/market/quote?${q.toString()}`);
   },
 

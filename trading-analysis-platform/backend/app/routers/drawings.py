@@ -96,6 +96,10 @@ def update_drawing(
     dibujo = repo.get_owned(user.C005Id, drawing_id)
     if dibujo is None:
         raise HTTPException(status_code=404, detail="Dibujo no encontrado")
+    # Un dibujo BLOQUEADO no se puede mover/editar (salvo que el payload lo
+    # este desbloqueando explicitamente con locked=false).
+    if bool(dibujo.Bloqueado) and payload.locked:
+        raise HTTPException(status_code=423, detail="El dibujo está bloqueado")
     repo.update(
         dibujo,
         TipoDibujo=payload.type,

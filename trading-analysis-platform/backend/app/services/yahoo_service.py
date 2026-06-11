@@ -236,12 +236,15 @@ def get_ohlcv(
     preset_key: str,
     include_warmup: bool = False,
     warmup_bars: int = 0,
+    force_refresh: bool = False,
 ) -> OHLCVResponse:
     """Punto de entrada principal: respuesta normalizada y cacheada.
 
     Con include_warmup, ademas de las velas visibles del preset se devuelven
     `warmupBars` previas (solo para calculo de indicadores como SMA 200; nunca
     se pintan como candles). El cache distingue ambas variantes.
+    force_refresh ignora la LECTURA del cache (el resultado fresco igual se
+    cachea) — lo usa el boton/auto-refresh del frontend.
     """
     symbol = symbol.strip().upper()
     if not symbol:
@@ -256,9 +259,10 @@ def get_ohlcv(
     cache_key = make_market_key(
         symbol, preset_key, preset.interval, PRICE_BASIS, effective_warmup
     )
-    cached = _cache.get(cache_key)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
 
     warmup: list = []
     visible_from_ms: int | None = None
@@ -293,7 +297,7 @@ def get_ohlcv(
     return response
 
 
-def get_quote(symbol: str) -> QuoteResponse:
+def get_quote(symbol: str, force_refresh: bool = False) -> QuoteResponse:
     """Cotizacion canonica del simbolo (fuente unica del precio actual).
 
     Estrategia (de mas a menos fiable):
@@ -302,15 +306,17 @@ def get_quote(symbol: str) -> QuoteResponse:
     3. ultimo close del historico 1d/1m (o 5d/1m) como ultimo recurso.
 
     Cache propia con TTL corto (quote:{SYMBOL}), independiente del OHLCV.
+    force_refresh ignora la lectura del cache (el resultado igual se cachea).
     """
     symbol = symbol.strip().upper()
     if not symbol:
         raise SymbolNotFoundError("symbol vacio")
 
     cache_key = make_quote_key(symbol)
-    cached = _quote_cache.get(cache_key)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        cached = _quote_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
     import yfinance as yf
 

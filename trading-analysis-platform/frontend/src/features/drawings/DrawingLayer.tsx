@@ -62,6 +62,10 @@ type Interaction =
 const DRAW_COLOR = "#60a5fa";
 const SELECT_COLOR = "#f59e0b";
 const HIT_TOLERANCE = 8;
+// Radio de agarre de los extremos (manijas) al editar con el cursor.
+const HANDLE_RADIUS_PX = 10;
+// Tipos cuyo EXTREMO se puede arrastrar individualmente (lineas).
+const ENDPOINT_EDIT_TYPES = new Set(["free_line", "dotted_line", "extended_trendline"]);
 // Radio del "pincel" de la goma. 6 px: comodo pero sin borrar lineas vecinas.
 const DEFAULT_ERASER_RADIUS_PX = 6;
 const DEV = import.meta.env.DEV;
@@ -118,6 +122,22 @@ export function DrawingLayer({
   // Posicion del puntero para el circulo-preview de la goma.
   const [eraserPos, setEraserPos] = useState<LocalPoint | null>(null);
 
+  // ---- Edicion (mover/ajustar) con el cursor ----
+  // Arrastre en curso: cuerpo completo (conserva pendiente) o un extremo.
+  const dragRef = useRef<
+    | null
+    | {
+        drawingId: string;
+        mode: "body" | "endpoint";
+        endpointIndex: number;
+        startDp: DrawingPoint;
+        originalPoints: DrawingPoint[];
+      }
+  >(null);
+  // Puntos "borrador" mientras se arrastra (solo render; se persiste al soltar).
+  const [draft, setDraft] = useState<{ id: string; points: DrawingPoint[] } | null>(null);
+  const updateDrawing = useDrawingStore((s) => s.updateDrawing);
+
   // Fuerza re-render del overlay cuando cambia el viewport (pan/zoom/resize).
   const [, setRenderVersion] = useState(0);
   const invalidate = useCallback(() => setRenderVersion((v) => v + 1), []);
@@ -131,8 +151,11 @@ export function DrawingLayer({
   const isDrawingActive = editable && isTwoPointTool(activeTool);
   const isEraser = editable && activeTool === "eraser";
   const isCursor = editable && activeTool === "cursor";
-  // El overlay captura punteros al dibujar y al borrar.
-  const overlayInteractive = isDrawingActive || isEraser;
+  // Con el cursor y un dibujo seleccionado, el overlay captura punteros para
+  // poder ARRASTRAR la linea o sus extremos (pan/zoom se pausa mientras).
+  const isEditMode = isCursor && selectedDrawingId != null;
+  // El overlay captura punteros al dibujar, al borrar y al editar.
+  const overlayInteractive = isDrawingActive || isEraser || isEditMode;
 
   // Sincroniza la maquina de estados con la herramienta activa.
   useEffect(() => {
@@ -217,6 +240,9 @@ export function DrawingLayer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       isErasingRef.current = false;
+      // Cancela el arrastre de edicion sin persistir.
+      dragRef.current = null;
+      setDraft(null);
       setInteraction((prev) =>
         prev.mode === "awaiting_second_point"
           ? { mode: "awaiting_first_point", tool: prev.tool }
@@ -275,6 +301,48 @@ export function DrawingLayer({
       return;
     }
 
+    // Cursor + seleccion: arrastre de extremo, de cuerpo, o re-seleccion.
+    if (isEditMode) {
+      const { local, dp } = localToDrawing(e);
+      const selected = drawings.find((d) => d.id === selectedDrawingId) ?? null;
+      if (selected && !selected.locked && dp && chart && mainSeries) {
+        // 1) ¿Agarro un EXTREMO de la linea seleccionada?
+        if (ENDPOINT_EDIT_TYPES.has(selected.type)) {
+          for (let i = 0; i < selected.points.length; i++) {
+            const lp = drawingPointToLocalPointRobust(
+              selected.points[i], chart, mainSeries, convCtx.bars, convCtx.future
+            );
+            if (lp && Math.hypot(local.x - lp.x, local.y - lp.y) <= HANDLE_RADIUS_PX) {
+              dragRef.current = {
+                drawingId: selected.id,
+                mode: "endpoint",
+                endpointIndex: i,
+                startDp: dp,
+                originalPoints: selected.points.map((p) => ({ ...p })),
+              };
+              return;
+            }
+          }
+        }
+        // 2) ¿Agarro el CUERPO? (mueve la linea completa conservando pendiente)
+        const range = instance?.getVisibleTimeRangeMs() ?? null;
+        if (hitTest(selected, local, chart, mainSeries, size, range, HIT_TOLERANCE, convCtx)) {
+          dragRef.current = {
+            drawingId: selected.id,
+            mode: "body",
+            endpointIndex: -1,
+            startDp: dp,
+            originalPoints: selected.points.map((p) => ({ ...p })),
+          };
+          return;
+        }
+      }
+      // 3) Click fuera: re-selecciona otro dibujo o deselecciona.
+      const hit = findHitDrawing(local);
+      selectDrawing(hit ? hit.id : null);
+      return;
+    }
+
     const { local, dp } = localToDrawing(e);
     if (DEV) {
       // eslint-disable-next-line no-console
@@ -313,6 +381,29 @@ export function DrawingLayer({
       return;
     }
 
+    // Arrastre de edicion en curso (cursor): actualiza el borrador en vivo.
+    const drag = dragRef.current;
+    if (drag) {
+      const { dp } = localToDrawing(e);
+      if (!dp) return;
+      if (drag.mode === "body") {
+        const dt = dp.time - drag.startDp.time;
+        const dPrice = dp.price - drag.startDp.price;
+        setDraft({
+          id: drag.drawingId,
+          points: drag.originalPoints.map((p) => ({
+            time: p.time + dt,
+            price: p.price + dPrice,
+          })),
+        });
+      } else {
+        const points = drag.originalPoints.map((p) => ({ ...p }));
+        points[drag.endpointIndex] = dp;
+        setDraft({ id: drag.drawingId, points });
+      }
+      return;
+    }
+
     if (interactionRef.current.mode !== "awaiting_second_point") return;
     const { dp } = localToDrawing(e);
     if (!dp) return;
@@ -330,12 +421,34 @@ export function DrawingLayer({
     }
   };
 
+  // Suelta el arrastre de edicion: persiste los puntos nuevos en SQL (ms).
+  const finishDrag = (e: React.PointerEvent, persist: boolean) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    try {
+      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    } catch {
+      /* puede no estar capturado */
+    }
+    setDraft((current) => {
+      if (persist && drag && current && current.id === drag.drawingId) {
+        const drawing = drawings.find((d) => d.id === drag.drawingId);
+        if (drawing) {
+          void updateDrawing({ ...drawing, points: current.points });
+        }
+      }
+      return null;
+    });
+  };
+
   const onPointerUp = (e: React.PointerEvent) => {
     if (isEraser) endEraserStroke(e);
+    if (dragRef.current) finishDrag(e, true);
   };
 
   const onPointerCancel = (e: React.PointerEvent) => {
     if (isEraser) endEraserStroke(e);
+    if (dragRef.current) finishDrag(e, false);
   };
 
   const onPointerLeave = () => {
@@ -355,8 +468,13 @@ export function DrawingLayer({
   // ---- Render del overlay ----
   const visibleRange: VisibleRange = instance ? instance.getVisibleTimeRangeMs() : null;
 
+  // Durante el arrastre, el dibujo editado se pinta con los puntos BORRADOR.
+  const effectiveDrawings = draft
+    ? drawings.map((d) => (d.id === draft.id ? { ...d, points: draft.points } : d))
+    : drawings;
+
   const renderableLines = chart && mainSeries
-    ? drawings
+    ? effectiveDrawings
         .filter((d) => d.visible)
         .map((d) =>
           renderDrawing(d, chart, mainSeries, size, d.id === selectedDrawingId, {
@@ -368,6 +486,34 @@ export function DrawingLayer({
         )
         .filter((el): el is JSX.Element => el !== null)
     : [];
+
+  // Manijas de extremos del dibujo seleccionado (solo lineas, con cursor).
+  let handleEls: JSX.Element[] = [];
+  if (isCursor && chart && mainSeries && selectedDrawingId) {
+    const selected = effectiveDrawings.find((d) => d.id === selectedDrawingId);
+    if (selected && selected.visible && !selected.locked && ENDPOINT_EDIT_TYPES.has(selected.type)) {
+      handleEls = selected.points
+        .map((p, i) => {
+          const lp = drawingPointToLocalPointRobust(
+            p, chart, mainSeries, convCtx.bars, convCtx.future
+          );
+          if (!lp) return null;
+          return (
+            <circle
+              key={`handle-${selected.id}-${i}`}
+              cx={lp.x}
+              cy={lp.y}
+              r={5}
+              fill="#0d1017"
+              stroke={SELECT_COLOR}
+              strokeWidth={2}
+              pointerEvents="none"
+            />
+          );
+        })
+        .filter((el): el is JSX.Element => el !== null);
+    }
+  }
 
   // Preview acorde a la herramienta activa.
   let previewEl: JSX.Element | null = null;
@@ -397,7 +543,13 @@ export function DrawingLayer({
           zIndex: 20,
           pointerEvents: overlayInteractive ? "auto" : "none",
           // La goma oculta el cursor nativo: el circulo-preview es el cursor.
-          cursor: isEraser ? "none" : isDrawingActive ? "crosshair" : "default",
+          cursor: isEraser
+            ? "none"
+            : isDrawingActive
+              ? "crosshair"
+              : isEditMode
+                ? "move"
+                : "default",
           touchAction: overlayInteractive ? "none" : "auto",
         }}
         onPointerDown={onPointerDown}
@@ -408,6 +560,7 @@ export function DrawingLayer({
         onContextMenu={onContextMenu}
       >
         {renderableLines}
+        {handleEls}
         {previewEl}
         {isEraser && eraserPos && (
           <circle

@@ -13,10 +13,13 @@ router = APIRouter(prefix="/market", tags=["market"])
 @router.get("/quote", response_model=QuoteResponse)
 def get_quote(
     symbol: str = Query(..., min_length=1, description="Ticker, ej. AAPL"),
+    forceRefresh: bool = Query(
+        False, description="Ignora el cache corto y pide datos frescos a Yahoo"
+    ),
 ) -> QuoteResponse:
     """Cotizacion canonica: fuente unica del 'precio actual' del simbolo."""
     try:
-        return yahoo_service.get_quote(symbol)
+        return yahoo_service.get_quote(symbol, force_refresh=forceRefresh)
     except yahoo_service.SymbolNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except yahoo_service.MarketDataError as exc:
@@ -35,12 +38,19 @@ def get_ohlcv(
     warmupBars: int = Query(
         260, ge=0, le=600, description="Cuantas velas de warmup pedir"
     ),
+    forceRefresh: bool = Query(
+        False, description="Ignora el cache y pide datos frescos a Yahoo"
+    ),
 ) -> OHLCVResponse:
     if preset not in PRESETS_BY_KEY:
         raise HTTPException(status_code=400, detail=f"Preset invalido: {preset}")
     try:
         return yahoo_service.get_ohlcv(
-            symbol, preset, include_warmup=includeWarmup, warmup_bars=warmupBars
+            symbol,
+            preset,
+            include_warmup=includeWarmup,
+            warmup_bars=warmupBars,
+            force_refresh=forceRefresh,
         )
     except yahoo_service.SymbolNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

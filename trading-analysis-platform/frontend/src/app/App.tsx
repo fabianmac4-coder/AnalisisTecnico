@@ -4,10 +4,15 @@ import { useSymbolStore } from "@/stores/symbolStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
 import { startIndicatorSync } from "@/features/indicators/indicatorSync";
+import { useAutoRefresh } from "@/features/refresh/useAutoRefresh";
 
 export function App() {
   const hydrateCatalog = useSymbolStore((s) => s.hydrate);
   const hydrateChartTypes = useChartStore((s) => s.hydrateChartTypes);
+
+  // Temporizador de auto-refresh del simbolo activo (Off sin intervalo).
+  const activeSymbol = useChartStore((s) => s.activeSymbol);
+  useAutoRefresh(activeSymbol);
 
   // Carga inicial desde SQL via API (App solo se monta con sesion iniciada).
   useEffect(() => {

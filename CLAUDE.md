@@ -54,17 +54,52 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 ### SQL Server schema is pre-existing — adapt to it, never recreate it
 - NEVER run `Base.metadata.create_all()` against SQL Server; tables exist. Schema changes go in
   idempotent scripts under `backend/sql/` run via `scripts/run_migrations.py`.
-- Tables: `dbo.C005` users, `C006` password tokens (the ONLY table with IDENTITY), `C010` acciones,
-  `C0101` drawings, `C020` indicator configs, `C030` layouts, `C040` user↔accion catalog. Original
-  tables have NO IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1).
+- Tables: `dbo.C005` users, `C006` password tokens, `C010` acciones, `C0101` drawings, `C020`
+  indicator configs, `C030` layouts, `C040` user↔accion catalog, `C050` simulated/paper-trade
+  entries, `C060` cached news, `C061` news↔accion links, `C062` market-mover snapshots, `C063`
+  snapshot items, `C110` AI chat conversations, `C111` AI chat messages. Original tables have NO
+  IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1); ONLY the new
+  tables C006/C050/C060-C063/C110/C111 use IDENTITY.
+- SQL Server does NOT support `NULLS LAST` — order with a portable
+  `case((col.is_(None), 1), else_=0)` instead of `.nullslast()` (SQLite tests accept both, so only
+  the real DB catches it).
+- News/movers: frontend NEVER calls external providers. Backend providers live behind interfaces
+  (`services/news/` and `services/market_movers/`; Yahoo via yfinance + Yahoo Finance RSS feeds
+  (latest/top/per-symbol headline) + Google News RSS via httpx with bounded QUERY GROUPS, all
+  best-effort: failures return [] and the SQL cache is served with a warning). Orchestrators cache
+  in C060-C063 with short TTLs (`NEWS_*`/`MARKET_MOVERS_TTL_MINUTES`), dedupe news by NORMALIZED
+  URL (tracking params stripped — `noticias_repository.normalize_url`) then (Proveedor, ExternalId),
+  and honor `forceRefresh`. Global aggregation (`_aggregate_global_sources`) pulls Yahoo
+  latest/top/trending + Google global/geopolitical/trending; `GET /api/news/top-trending-stocks-today`
+  serves the "stocks moving today" section. Category classifier is keyword-based: "Geopolitics /
+  Policy" includes POLITICAL/policy terms (Trump, tariffs, trade deals, shutdown, sanctions…), and
+  "Top Trending Stocks Today" catches mover headlines. `?source=yahoo|google` filters by provider
+  prefix. Related tickers are extracted against KNOWN C010 tickers only (stopwords: USA/CEO/ETF…)
+  and linked via C061. AI/ChatGPT contexts include max 5 symbol headlines + top 3 global + top 3
+  trending (from the SQL cache, never live calls) — prompts say not to invent news.
+- Drawings are EDITABLE with the cursor tool: selecting a line makes the overlay interactive
+  (pan/zoom pauses); drag the body (preserves slope) or an endpoint handle (10px radius), draft
+  renders live and persists on pointer-up via `drawingStore.updateDrawing` (PATCH; rejects
+  `Bloqueado=1` with 423 unless unlocking; `Version` is the MIGRATION version — never bump it as an
+  edit counter). Escape cancels without persisting.
+- Channel R/R is AUTO-detected by default (`channelAutoDetection.detectChannels`): pairs of
+  ~parallel free_line/extended_trendline/dotted_line (slope tolerance 15%, ≥20% time overlap,
+  width 1-40% of price, reference inside ±5%), upper/lower assigned by price at reference time,
+  scored by overlap/inside/timeframe. The effective result is published in
+  `channelRiskRewardStore.result` (manual override available, collapsed) and feeds the per-chart
+  `ChannelRiskRewardBadge` (rendered in ChartCanvas) and both AI prompts (with `confidence`).
+- Naming convention: physical SQL tables use CODE-ONLY names (`C110`, never `C110_ChatConversaciones`);
+  PK/FK columns are exactly `CxxxId` (`C110Id`, `C005Id` — never `C005ID`, `UserId`, `usuario_id`).
+  Descriptive names (C110-ChatConversaciones) exist only in documentation.
 - `C005.NombreNormalizado` and `C010.TickerNormalizado` are **persisted computed columns**
   (`UPPER(TRIM(...))`): never write them; normalize lookups to UPPER instead (repos use
   `func.upper(func.trim(...))` so SQLite tests behave identically).
 - Soft deletes only: users → `Activo=0` + `FechaDesactivacion`; drawings → `Eliminado=1`;
-  catalog rows → `Activo=0`. No physical DELETEs of user data, with ONE deliberate exception:
-  `DELETE /api/admin/users/{id}/hard-delete` (purge test users: children C006/C0101/C020/C030/C040
-  first, then C005, single transaction — `UsersRepository.hard_delete_user`; guards: not self, not
-  the last active admin; frontend requires typing DELETE).
+  catalog rows → `Activo=0`; AI conversations → `C110.Activo=0`. No physical DELETEs of user data,
+  with ONE deliberate exception: `DELETE /api/admin/users/{id}/hard-delete` (purge test users:
+  children first — C111 (via the user's C110 ids) → C110 → C050/C006/C0101/C020/C030/C040 — then
+  C005, single transaction — `UsersRepository.hard_delete_user`; guards: not self, not the last
+  active admin; frontend requires typing DELETE).
 
 ### Auth rules
 - No public registration; admins create users (`/api/admin/users`). Created users get a password
@@ -109,6 +144,54 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - Indicator configs sync to SQL via `features/indicators/indicatorSync.ts` (GET on app mount, debounced
   PUT 800ms); guarded out of test mode in `App.tsx`.
 
+### AI Chat (OpenAI) rules
+- `OPENAI_API_KEY` lives ONLY in `backend/.env` (empty key → clean 503 "IA no disponible"; never
+  hardcode, log, or send it to the frontend). The frontend NEVER calls OpenAI directly — everything
+  goes through `/api/ai/*` (`routers/ai_chat.py`), Bearer-protected like the rest of the app.
+- Conversations (`C110`) and messages (`C111`) are scoped by `C005Id` via `ChatRepository` —
+  ownership is checked on every read/write (`get_conversation_for_user`); cross-user access is 404.
+- Context (`services/ai_context_service.py`) is concise and safe: quote + 1Y daily summary,
+  C020 indicator configs + current SMA/EMA/RSI values, summarized C0101 drawings (capped at
+  `AI_CHAT_MAX_DRAWINGS_CONTEXT`), C040 watchlist notes, yfinance news (`news_service.py`,
+  best-effort; `news_available:false` when missing so the model doesn't invent news). It must NEVER
+  include PasswordHash, tokens, emails of other users, or other users' data — there's a test for it.
+- Each section of the context catches its own exceptions: market/news failures never break the chat,
+  and an AI failure never breaks the dashboard (the user message stays persisted in C111).
+- Send flow stores the user message FIRST, then calls OpenAI (Responses API preferred, fallback to
+  chat.completions), then stores the assistant reply with token counts. History sent to the model is
+  capped at `AI_CHAT_MAX_CONTEXT_MESSAGES`. In-memory per-user rate limit
+  (`AI_CHAT_MAX_MESSAGES_PER_MINUTE`) returns 429.
+- Frontend: `features/aiChat/` (zustand store + drawer panel scoped to the active ticker; ✨ button
+  in the Header). Tests mock `openai_service.generate_reply`, `_market_summary`, and
+  `news_service.get_symbol_news` — no network ever.
+- SECOND AI mode — ChatGPT iframe/helper (`features/chatgptIframe/`, 🤖 button): NO OpenAI API, NO
+  C110/C111 writes. `GET /api/chatgpt/context` (auth, read-only) feeds a client-side prompt builder
+  (8 prompt types + 6 context toggles in `chatGptPromptService.ts`); user copies the prompt into
+  their own ChatGPT session (iframe with 5s-timeout fallback → "open in new tab", which copies
+  first). Never read/inject/scrape the iframe (cross-origin). Both panels are mutually exclusive
+  (each button closes the other store). `VITE_CHATGPT_IFRAME_*` env vars configure URL/enabling.
+
+### Watchlist (C040) rules
+- Removing from the watchlist = `C040.Activo=0` for the CURRENT user only, behind a confirmation
+  modal. NEVER delete the master `C010` row nor the user's drawings/indicators/layouts/AI chats.
+- The ★ star is real: `C040.Favorito` via `PATCH /api/catalog/{c010Id}/favorite` (also `pinned` in
+  the generic PATCH). Backend list order: `Favorito DESC, UltimaConsulta DESC, Ticker ASC`; sidebar
+  has a "Solo favoritos" filter and sorts favorites first.
+
+### Simulated entries (C050) & channel risk/reward
+- `dbo.C050` = paper-trade entries per user+accion (LONG/SHORT, ABIERTA/CERRADA). API
+  `/api/simulated-trades` (auth, scoped by C005Id); soft delete = `Activo=0 AND Visible=0`.
+  Performance: open entries use the canonical quote; CERRADA uses `PrecioSalida` (realized).
+  Markers render as dashed price lines via the optional `ChartInstance.setSimulatedEntryLines`
+  (optional so fake ChartInstance objects in tests don't break). Watchlist removal NEVER touches C050.
+- Channel R/R (`features/channelRiskReward/`) is FRONTEND-ONLY math over two user-selected
+  `free_line` drawings: `getLinePriceAtTime` interpolates/extrapolates in **ms** (never LWC seconds);
+  upper/lower swap automatically; reward<=0 / risk<=0 produce `invalidReason` instead of a ratio.
+  The result is published in `channelRiskRewardStore` and flows into BOTH AI prompts: the ChatGPT
+  prompt builder reads it at rebuild, and `aiChatStore.sendMessage` sends it as the optional
+  `channelRiskReward` field (merged into the model context server-side). Both AI contexts also
+  include `simulatedEntries`. Everything is labeled hypothetical — never investment advice.
+
 ### Timeframes are defined twice and must stay aligned
 The six presets — `4Y_1W` (weekly!), `1Y_1D`, `6M_1D`, `3M_1D`, `1M_1H`, `1W_30M` — are defined in
 `frontend/src/utils/timeframes.ts` AND `backend/app/timeframes.py` (same keys/intervals). Change both
@@ -132,7 +215,14 @@ title). Never derive a displayed price from a panel's last bar.
 - Raw prices only: `auto_adjust=False`, never Adj Close. All responses declare `priceBasis: "raw"`.
 - One normalization path: `normalize_ohlcv_dataframe` (flattens MultiIndex, drops NaN rows, sorts, ms UTC).
 - Cache keys: `ohlcv:SYMBOL:PRESET:interval:raw[:wN]` and `quote:SYMBOL` (separate caches; quote TTL 30s,
-  OHLCV TTL 300s — see `app/config.py`, env prefix `TAP_`).
+  OHLCV TTL 300s — see `app/config.py`, env prefix `TAP_`). `?forceRefresh=true` (quote/ohlcv) skips
+  the cache READ but still writes the fresh result — used by the manual/auto refresh feature.
+- Refresh feature (`frontend/src/features/refresh/`): `refreshNow` → `chartStore.refreshAllPresets`
+  (NON-destructive: keeps old candles while loading and per-preset on failure; never clears charts)
+  + reloads simulated-trade performance. Auto-refresh: radio-style 5/10/15/20 min (min 5 — Yahoo rate
+  safety), persisted at `tradingPlatform.autoRefreshIntervalMinutes`, timer in `useAutoRefresh`
+  (mounted in App; dedupes via isRefreshing, skips ticks while the tab is hidden, refreshes once on
+  return only if a full interval elapsed).
 - Warmup: `?includeWarmup=true&warmupBars=N` returns `warmupBars` SEPARATE from visible `bars` plus
   `visibleFrom/visibleTo`. Indicators compute over `[...warmupBars, ...bars]` then filter output to the
   visible range; warmup bars are never rendered as candles. Intraday warmup is clamped to yfinance

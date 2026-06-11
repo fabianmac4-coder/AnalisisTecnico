@@ -18,6 +18,7 @@ class CatalogoRepository:
         self.db = db
 
     def list_by_user(self, user_id: int) -> list[tuple[CatalogoUsuarioAccion, Accion]]:
+        # Favoritos primero, luego por ultima consulta y ticker.
         rows = self.db.execute(
             select(CatalogoUsuarioAccion, Accion)
             .join(Accion, CatalogoUsuarioAccion.C010Id == Accion.C010Id)
@@ -25,7 +26,11 @@ class CatalogoRepository:
                 CatalogoUsuarioAccion.C005Id == user_id,
                 CatalogoUsuarioAccion.Activo == True,  # noqa: E712
             )
-            .order_by(CatalogoUsuarioAccion.C040Id)
+            .order_by(
+                CatalogoUsuarioAccion.Favorito.desc(),
+                CatalogoUsuarioAccion.UltimaConsulta.desc(),
+                Accion.Ticker.asc(),
+            )
         ).all()
         return [(r[0], r[1]) for r in rows]
 

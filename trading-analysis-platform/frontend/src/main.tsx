@@ -10,6 +10,8 @@ import { AdminRoute, ProtectedRoute } from "./features/auth/ProtectedRoute";
 import { AdminUsersPage } from "./features/auth/AdminUsersPage";
 import { MyAccountPage } from "./features/account/MyAccountPage";
 import { ChangePasswordPage } from "./features/account/ChangePasswordPage";
+import { NewsPage } from "./features/news/NewsPage";
+import { MarketMoversPage } from "./features/marketMovers/MarketMoversPage";
 import { useAuthStore } from "./features/auth/authStore";
 import "./index.css";
 
@@ -32,6 +34,22 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/set-password" element={<SetPasswordPage />} />
             <Route path="/reset-password" element={<SetPasswordPage mode="reset" />} />
+            <Route
+              path="/news"
+              element={
+                <ProtectedRoute>
+                  <NewsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/market-movers"
+              element={
+                <ProtectedRoute>
+                  <MarketMoversPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/account"
               element={

@@ -9,6 +9,8 @@ import type { Drawing } from "@/features/drawings/drawingTypes";
 import type { PresetKey } from "@/utils/timeframes";
 import { DrawingLayer } from "@/features/drawings/DrawingLayer";
 import { createFutureWhitespace, PRESET_STEP_MS } from "./futureWhitespace";
+import { useSimulatedTradesStore } from "@/features/simulatedTrades/simulatedTradesStore";
+import { ChannelRiskRewardBadge } from "@/features/channelRiskReward/ChannelRiskRewardBadge";
 
 /** Linea de indicador overlay sobre el precio (tiempo en segundos UTC). */
 export interface OverlayLine {
@@ -133,6 +135,21 @@ export function ChartCanvas({
     instance?.setCanonicalPriceLine(canonicalPrice, canonicalChange);
   }, [instance, canonicalPrice, canonicalChange, chartType]);
 
+  // Marcadores de ENTRADAS SIMULADAS (paper trading): lineas punteadas al
+  // precio de entrada, persistidas en SQL (C050) y visibles en los 6 charts.
+  const simTrades = useSimulatedTradesStore((s) => s.tradesBySymbol[symbol]);
+  useEffect(() => {
+    if (!instance?.setSimulatedEntryLines) return;
+    const lines = (simTrades ?? [])
+      .filter((t) => t.status === "ABIERTA" && t.visible)
+      .map((t) => ({
+        price: t.entryPrice,
+        color: t.color,
+        title: t.name || `Sim ${t.type}`,
+      }));
+    instance.setSimulatedEntryLines(lines);
+  }, [instance, simTrades, chartType]);
+
   // Overlays de indicadores (SMA/EMA/Bollinger...).
   useEffect(() => {
     const adapter = adapterRef.current;
@@ -178,6 +195,8 @@ export function ChartCanvas({
         futureInfo={futureInfo}
         candles={candles}
       />
+      {/* R/R del canal auto-detectado (igual en los 6 paneles; hipotetico). */}
+      <ChannelRiskRewardBadge />
     </div>
   );
 }
