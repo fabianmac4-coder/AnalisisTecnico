@@ -206,7 +206,22 @@ def get_global_news(
                 "No se pudieron actualizar algunas fuentes; se muestran los titulares en cache"
             )
 
-    rows = repo.list_global_news(category=category_name, limit=limit, source=source)
+    # Ranking en lectura: frescura primero, con boost por calidad de fuente,
+    # keywords de impacto de mercado y categoria (dashboard de mercado, no
+    # busqueda web generica). Se trae un excedente y se recorta tras ordenar.
+    from app.services.news.news_relevance import global_rank_score
+
+    rows = repo.list_global_news(
+        category=category_name, limit=min(limit * 3, 150), source=source
+    )
+    now = utcnow()
+    rows.sort(
+        key=lambda r: global_rank_score(
+            r.Titulo, r.Resumen, r.Publisher, r.Categoria, r.FechaPublicacion, now
+        ),
+        reverse=True,
+    )
+    rows = rows[:limit]
     newest = repo.newest_fetch_time()
     return {
         "items": [_row_to_dict(r) for r in rows],
@@ -298,18 +313,36 @@ def get_top_trending_stock_news(
     }
 
 
+# Proveedores cuyos feeds por simbolo YA estan vinculados al ticker en
+# origen (Yahoo consulta por ticker): reciben el bono provider_linked.
+_TICKER_LINKED_PROVIDERS = ("YAHOO_FINANCE_SYMBOL", "YAHOO_FINANCE_TRENDING_STOCKS")
+
+
 def get_symbol_news(
     db: Session,
     symbol: str,
     limit: int = 30,
     force_refresh: bool = False,
 ) -> dict:
+    """Noticias del simbolo activo con relevancia ESTRICTA.
+
+    - Consultas company-aware desde la metadata de C010 (nunca el ticker
+      crudo solo: OPEN/AI/ON son palabras comunes en ingles).
+    - Solo lo que pasa el umbral de relevancia se vincula en C061; lo
+      irrelevante con valor global queda en C060 SIN vinculo.
+    - En lectura se RE-puntua (limpia vinculos viejos contaminados) y cada
+      item lleva relevanceScore/relevanceReason para diagnostico.
+    """
+    from app.services.news import news_relevance
+    from app.services.news.news_types import NewsItem
+
     symbol = symbol.strip().upper()
     repo = NoticiasRepository(db)
     acciones = AccionesRepository(db)
     accion = acciones.get_or_create_from_yahoo_symbol(symbol)
     db.commit()
 
+    threshold = news_relevance.relevance_threshold(accion)
     ttl = env_settings.NEWS_SYMBOL_TTL_MINUTES
     warnings: list[str] = []
     newest = repo.newest_fetch_time(accion.C010Id)
@@ -320,10 +353,28 @@ def get_symbol_news(
 
     fetched = False
     if force_refresh or not is_fresh:
+        queries = news_relevance.build_symbol_news_queries(accion)
+        if env_settings.NEWS_DEBUG:
+            logger.info(
+                "Symbol news %s (empresa=%s, yahoo=%s, umbral=%d): consultas=%s",
+                symbol,
+                accion.NombreInstrumento,
+                accion.YahooSymbol,
+                threshold,
+                queries,
+            )
         got_any = False
+        accepted = rejected = 0
         for provider in _providers():
             try:
-                items = provider.get_symbol_news(symbol, limit=limit)
+                # Google usa consultas company-aware; Yahoo va por ticker
+                # (sus feeds por simbolo ya estan vinculados en origen).
+                if hasattr(provider, "get_symbol_news_for_instrument"):
+                    items = provider.get_symbol_news_for_instrument(
+                        accion, queries, limit=limit
+                    )
+                else:
+                    items = provider.get_symbol_news(symbol, limit=limit)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Provider %s fallo: %s", provider.name, type(exc).__name__)
                 items = []
@@ -331,23 +382,89 @@ def get_symbol_news(
                 continue
             got_any = True
             for item in items:
-                noticia = repo.upsert_news_item(item)
-                repo.link_news_to_action(noticia.C060Id, accion.C010Id)
+                score, reason = news_relevance.score_symbol_news_relevance(
+                    item, accion
+                )
+                if score >= threshold:
+                    noticia = repo.upsert_news_item(item)
+                    repo.link_news_to_action(
+                        noticia.C060Id, accion.C010Id, relevance=float(score)
+                    )
+                    accepted += 1
+                else:
+                    rejected += 1
+                    if env_settings.NEWS_DEBUG:
+                        logger.info(
+                            "Rechazada para %s: '%s' (score %d < %d): %s",
+                            symbol,
+                            (item.title or "")[:80],
+                            score,
+                            threshold,
+                            reason,
+                        )
+                    # Con valor de mercado global: se guarda en C060 pero
+                    # JAMAS se vincula al instrumento via C061.
+                    if item.category and item.category != "Other":
+                        repo.upsert_news_item(item)
         if got_any:
             db.commit()
             fetched = True
+            if env_settings.NEWS_DEBUG:
+                logger.info(
+                    "Symbol news %s: %d aceptadas, %d rechazadas (umbral %d)",
+                    symbol,
+                    accepted,
+                    rejected,
+                    threshold,
+                )
         elif force_refresh:
             warnings.append("No se pudieron actualizar las noticias; se muestra el cache")
 
-    rows = repo.list_symbol_news(accion.C010Id, limit=limit)
+    # Lectura con RE-score: filtra tambien vinculos C061 historicos que ya
+    # no pasarian el umbral (contaminacion previa a este filtro).
+    rows = repo.list_symbol_news(accion.C010Id, limit=limit * 2)
     newest = repo.newest_fetch_time(accion.C010Id)
-    items_out = [_row_to_dict(r) for r in rows]
-    for item in items_out:
-        item["relatedTickers"] = [symbol]
-    return {
+    items_out: list[dict] = []
+    for row in rows:
+        pseudo = NewsItem(
+            title=row.Titulo,
+            url=row.URL,
+            provider=row.Proveedor,
+            summary=row.Resumen,
+        )
+        score, reason = news_relevance.score_symbol_news_relevance(
+            pseudo,
+            accion,
+            provider_linked=row.Proveedor in _TICKER_LINKED_PROVIDERS,
+        )
+        if score < threshold:
+            if env_settings.NEWS_DEBUG:
+                logger.info(
+                    "Cache filtrado para %s: '%s' (score %d < %d): %s",
+                    symbol,
+                    (row.Titulo or "")[:80],
+                    score,
+                    threshold,
+                    reason,
+                )
+            continue
+        item_dict = _row_to_dict(row)
+        item_dict["relatedTickers"] = [symbol]
+        item_dict["relevanceScore"] = score
+        item_dict["relevanceReason"] = reason
+        items_out.append(item_dict)
+        if len(items_out) >= limit:
+            break
+
+    out = {
         "symbol": symbol,
         "items": items_out,
         "lastUpdated": newest.isoformat() if newest else None,
         "fromCache": not fetched,
         "warnings": warnings,
     }
+    if not items_out:
+        out["message"] = (
+            f"No highly relevant recent news found for {symbol}."
+        )
+    return out

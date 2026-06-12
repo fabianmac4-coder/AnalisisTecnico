@@ -317,6 +317,21 @@ VITE_CHATGPT_IFRAME_FALLBACK_NEW_TAB=true
   link externo. **Panel compacto por ticker** en el sidebar ("Noticias AAPL")
   que se carga sin bloquear las gráficas. Los titulares también alimentan el
   contexto del AI Chat y el prompt de ChatGPT (máx. 5, sin inventar noticias).
+- **Relevancia ESTRICTA por símbolo**: el panel del ticker solo muestra
+  noticias realmente relacionadas con el instrumento activo. Las consultas se
+  construyen con la metadata de `C010` (nombre de empresa primero, ticker
+  después) y cada titular pasa por un score de relevancia con filtros de
+  falsos positivos: para **OPEN** solo cuenta Opendoor/`OPEN stock` (jamás
+  "SpaceX open IPO" ni "market open"); para **AI** solo C3.ai; para **ON**
+  solo ON Semiconductor. Tickers ambiguos exigen un umbral más alto, los
+  vínculos `C061` solo se crean si pasan el umbral, y si nada es relevante el
+  panel lo dice claramente en lugar de rellenar con basura. `NEWS_DEBUG=true`
+  loguea consultas, scores y razones de rechazo.
+- **Globales más amplias y rankeadas**: grupos de consultas intercalados
+  (mercado, geopolítica/política, macro/Fed, sectores, trending; hasta 30
+  consultas por refresh) y ranking en lectura por frescura + calidad de la
+  fuente (Reuters/Bloomberg/CNBC/WSJ…) + keywords de impacto de mercado — un
+  dashboard de mercado, no una búsqueda web genérica.
 - **🚀 Market Movers** (`/market-movers`): Tendencia, Mayores subidas,
   Mayores caídas y Más activas (screeners de Yahoo), con precio/cambio %/
   volumen/market cap; clic en el ticker abre las gráficas y `＋☆` lo agrega

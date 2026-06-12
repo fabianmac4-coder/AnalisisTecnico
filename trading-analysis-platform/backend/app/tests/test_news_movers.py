@@ -145,10 +145,16 @@ def test_news_dedupe_by_url(client, db_session, fake_provider):
 def test_symbol_news_links_to_c010(client, db_session, fake_provider):
     make_user(db_session, "Ana", "ana@example.com")
     headers = login_headers(client, "Ana")
+    # El panel del simbolo ahora es ESTRICTO: el item debe ser relevante
+    # para AAPL (contexto bursatil del ticker), no un titular generico.
+    fake_provider.items = [
+        _news("Apple (AAPL) stock rises after earnings beat", "https://x.com/aapl")
+    ]
     r = client.get("/api/news/symbol/AAPL", headers=headers)
     assert r.status_code == 200
     assert r.json()["symbol"] == "AAPL"
     assert len(r.json()["items"]) == 1
+    assert r.json()["items"][0]["relevanceScore"] >= 40
 
     accion = AccionesRepository(db_session).get_by_yahoo_symbol("AAPL")
     links = list(

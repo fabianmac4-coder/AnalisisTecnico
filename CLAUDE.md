@@ -80,6 +80,22 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
   dedicated pages `features/news/` (NewsPage at `/news`: filters, per-symbol panel, Top Trending
   Stocks Today) and `features/marketMovers/` (MarketMoversPage at `/market-movers`); both have
   their own zustand store + Api service and reach the backend only.
+- Symbol news is STRICT, global news is broad — never share rules between them
+  (`services/news/news_relevance.py`). Per-symbol: queries are built from C010 metadata
+  (`build_symbol_news_queries` — company name first, ticker second; never the raw ticker word),
+  every item gets a relevance score (`score_symbol_news_relevance`: company aliases, `{T} stock/
+  shares/earnings`, NYSE/NASDAQ context, provider-linked bonus for Yahoo per-ticker feeds,
+  per-ticker false-positive phrases) with threshold 40 (normal) / 70 (AMBIGUOUS_TICKERS: OPEN,
+  AI, ON, NOW, SHOP…). C061 links are created ONLY above threshold (score stored in
+  `C061.Relevancia`); below it the item is kept in C060 without a link only if it has global
+  market value. Reads RE-score rows (cleans historically contaminated C061 links — "SpaceX Open
+  IPO" never shows for OPEN) and each item carries `relevanceScore`/`relevanceReason`; empty
+  result returns a `message`, never generic filler. Aliases starting with the ambiguous ticker
+  itself ("ON Semiconductor") match case-SENSITIVELY. Global: interleaved query groups
+  (market/geopolitics/macro-Fed/sector/trending, ≤`NEWS_GLOBAL_MAX_QUERIES_PER_REFRESH`=30) and
+  read-time ranking `global_rank_score` (freshness dominates; boosts for quality publishers,
+  market-impact keywords, high-impact categories). `NEWS_DEBUG=true` logs queries, per-item
+  scores and rejection reasons.
 - Drawings are EDITABLE with the cursor tool: selecting a line makes the overlay interactive
   (pan/zoom pauses); drag the body (preserves slope) or an endpoint handle (10px radius), draft
   renders live and persists on pointer-up via `drawingStore.updateDrawing` (PATCH; rejects

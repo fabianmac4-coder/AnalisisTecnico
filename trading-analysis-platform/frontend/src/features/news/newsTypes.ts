@@ -12,6 +12,10 @@ export interface NewsItemDto {
   fetchedAt: string | null;
   imageUrl: string | null;
   relatedTickers: string[];
+  /** Solo en noticias POR SIMBOLO: score/razon del filtro estricto de
+   * relevancia del backend (diagnostico; la UI no lo muestra por defecto). */
+  relevanceScore?: number;
+  relevanceReason?: string;
 }
 
 export interface GlobalNewsResponse {
@@ -23,6 +27,8 @@ export interface GlobalNewsResponse {
 
 export interface SymbolNewsResponse extends GlobalNewsResponse {
   symbol: string;
+  /** Presente cuando ningun item paso el umbral de relevancia. */
+  message?: string;
 }
 
 export const NEWS_CATEGORIES = [

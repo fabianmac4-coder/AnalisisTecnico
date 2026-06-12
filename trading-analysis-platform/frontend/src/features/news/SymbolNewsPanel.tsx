@@ -62,9 +62,17 @@ export function SymbolNewsPanel() {
               ))}
             </div>
           ) : items.length === 0 ? (
-            <p className="px-1 text-[11px] text-muted">
-              Sin noticias recientes de {symbol}.
-            </p>
+            <div data-testid="symbol-news-empty" className="px-1">
+              {/* Filtro ESTRICTO: jamas se rellena con noticias genericas
+                  irrelevantes (OPEN/AI/ON son palabras comunes en ingles). */}
+              <p className="text-[11px] text-muted">
+                No se encontraron noticias recientes altamente relevantes para{" "}
+                {symbol}.
+              </p>
+              <p className="text-[10px] text-muted/70">
+                Intenta refrescar o revisa las noticias globales del mercado.
+              </p>
+            </div>
           ) : (
             <ul className="space-y-1">
               {items.slice(0, 7).map((item) => (

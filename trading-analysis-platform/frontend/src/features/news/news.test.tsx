@@ -143,9 +143,51 @@ describe("SymbolNewsPanel", () => {
     expect(screen.getByTestId("symbol-news-refresh")).toBeTruthy();
   });
 
-  it("sin noticias muestra mensaje claro", () => {
+  it("sin noticias relevantes muestra el mensaje estricto (sin relleno)", () => {
+    // El backend filtra por relevancia: si nada pasa el umbral, el panel
+    // NO se rellena con noticias genericas irrelevantes.
     render(<SymbolNewsPanel />);
-    expect(screen.getByText("Sin noticias recientes de AAPL.")).toBeTruthy();
+    const empty = screen.getByTestId("symbol-news-empty");
+    expect(empty.textContent).toContain(
+      "No se encontraron noticias recientes altamente relevantes para AAPL"
+    );
+    expect(empty.textContent).toContain("revisa las noticias globales");
+  });
+
+  it("para OPEN solo muestra lo que el backend acepto (sin 'SpaceX open IPO')", () => {
+    // El item irrelevante jamas llega: el backend lo rechaza por relevancia.
+    useSymbolStore.setState({ activeSymbol: "OPEN" } as never);
+    useNewsStore.setState({
+      symbolItemsBySymbol: {
+        OPEN: [
+          {
+            ...ITEM,
+            id: 2,
+            title: "Opendoor Technologies stock jumps after earnings",
+            relatedTickers: ["OPEN"],
+            relevanceScore: 130,
+            relevanceReason: "nombre de empresa en titulo (Opendoor Technologies)",
+          },
+        ],
+      },
+    });
+    render(<SymbolNewsPanel />);
+    expect(screen.getByText(/Opendoor Technologies stock jumps/)).toBeTruthy();
+    expect(screen.queryByText(/SpaceX/)).toBeNull();
+  });
+
+  it("el boton de refresh pide refresh estricto al backend (forceRefresh)", async () => {
+    useSymbolStore.setState({ activeSymbol: "OPEN" } as never);
+    const original = useNewsStore.getState().loadSymbol;
+    const loadSymbol = vi.fn().mockResolvedValue(undefined);
+    useNewsStore.setState({ loadSymbol } as never);
+    try {
+      render(<SymbolNewsPanel />);
+      fireEvent.click(screen.getByTestId("symbol-news-refresh"));
+      await waitFor(() => expect(loadSymbol).toHaveBeenCalledWith("OPEN", true));
+    } finally {
+      useNewsStore.setState({ loadSymbol: original } as never);
+    }
   });
 });
 
