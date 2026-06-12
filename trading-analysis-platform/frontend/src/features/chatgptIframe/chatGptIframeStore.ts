@@ -32,8 +32,13 @@ interface ChatGptIframeState extends ChatGptContextToggles {
 
 function rebuild(state: ChatGptIframeState): string {
   if (!state.context) return "";
-  // R/R de canal calculado en el panel (si el usuario selecciono dos lineas).
-  const channelRR = useChannelRiskRewardStore.getState().result;
+  // R/R de canal de la grafica ACTIVA (auto por temporalidad; manual si hay
+  // override). Nunca se mandan los canales de todas las temporalidades.
+  const channelState = useChannelRiskRewardStore.getState();
+  const channelRR = channelState.result;
+  const channelTimeframe = channelState.manualOverride
+    ? null
+    : channelState.autoBest?.timeframe ?? null;
   return buildChatGptPrompt(
     state.activePromptType,
     state.context,
@@ -45,7 +50,8 @@ function rebuild(state: ChatGptIframeState): string {
       includeFavoriteStatus: state.includeFavoriteStatus,
       includeTimeframeSummary: state.includeTimeframeSummary,
     },
-    channelRR
+    channelRR,
+    channelTimeframe
   );
 }
 

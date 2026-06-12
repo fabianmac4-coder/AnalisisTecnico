@@ -11,6 +11,7 @@ import { DrawingLayer } from "@/features/drawings/DrawingLayer";
 import { createFutureWhitespace, PRESET_STEP_MS } from "./futureWhitespace";
 import { useSimulatedTradesStore } from "@/features/simulatedTrades/simulatedTradesStore";
 import { ChannelRiskRewardBadge } from "@/features/channelRiskReward/ChannelRiskRewardBadge";
+import { useChannelRiskRewardStore } from "@/features/channelRiskReward/channelRiskRewardStore";
 
 /** Linea de indicador overlay sobre el precio (tiempo en segundos UTC). */
 export interface OverlayLine {
@@ -181,8 +182,15 @@ export function ChartCanvas({
     }
   }, [overlays]);
 
+  // Grafica ACTIVA: el ultimo panel clickeado decide que canal auto muestra
+  // el panel izquierdo de R/R (y el contexto que viaja a la IA).
+  const setActiveChartPreset = useChannelRiskRewardStore((s) => s.setActiveChartPreset);
+
   return (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      onPointerDownCapture={() => setActiveChartPreset(sourceTimeframe)}
+    >
       <div ref={containerRef} className="absolute inset-0" />
       <DrawingLayer
         instance={instance}
@@ -195,8 +203,8 @@ export function ChartCanvas({
         futureInfo={futureInfo}
         candles={candles}
       />
-      {/* R/R del canal auto-detectado (igual en los 6 paneles; hipotetico). */}
-      <ChannelRiskRewardBadge />
+      {/* R/R del canal auto-detectado SOLO de esta temporalidad (hipotetico). */}
+      <ChannelRiskRewardBadge preset={sourceTimeframe} />
     </div>
   );
 }

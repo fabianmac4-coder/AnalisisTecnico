@@ -76,18 +76,30 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
   "Top Trending Stocks Today" catches mover headlines. `?source=yahoo|google` filters by provider
   prefix. Related tickers are extracted against KNOWN C010 tickers only (stopwords: USA/CEO/ETF…)
   and linked via C061. AI/ChatGPT contexts include max 5 symbol headlines + top 3 global + top 3
-  trending (from the SQL cache, never live calls) — prompts say not to invent news.
+  trending (from the SQL cache, never live calls) — prompts say not to invent news. Frontend:
+  dedicated pages `features/news/` (NewsPage at `/news`: filters, per-symbol panel, Top Trending
+  Stocks Today) and `features/marketMovers/` (MarketMoversPage at `/market-movers`); both have
+  their own zustand store + Api service and reach the backend only.
 - Drawings are EDITABLE with the cursor tool: selecting a line makes the overlay interactive
   (pan/zoom pauses); drag the body (preserves slope) or an endpoint handle (10px radius), draft
   renders live and persists on pointer-up via `drawingStore.updateDrawing` (PATCH; rejects
   `Bloqueado=1` with 423 unless unlocking; `Version` is the MIGRATION version — never bump it as an
   edit counter). Escape cancels without persisting.
-- Channel R/R is AUTO-detected by default (`channelAutoDetection.detectChannels`): pairs of
-  ~parallel free_line/extended_trendline/dotted_line (slope tolerance 15%, ≥20% time overlap,
-  width 1-40% of price, reference inside ±5%), upper/lower assigned by price at reference time,
-  scored by overlap/inside/timeframe. The effective result is published in
-  `channelRiskRewardStore.result` (manual override available, collapsed) and feeds the per-chart
-  `ChannelRiskRewardBadge` (rendered in ChartCanvas) and both AI prompts (with `confidence`).
+- Channel R/R auto-detection is STRICT per timeframe: `detectChannels(drawings, refPrice,
+  targetTimeMs, { timeframe })` only pairs lines whose `sourceTimeframe === timeframe`
+  (`showOnAllTimeframes` is VISUAL-only — never detection eligibility). Pairing compares angles
+  in normalized coordinates (`pairAngleDifferenceDegrees`, tolerance 15°) — NEVER raw Unix-ms
+  slopes; no time-overlap requirement (lines extrapolate to the reference time; overlap only
+  boosts confidence); width 0.5–80% of price; reference up to 10% outside the channel is detected
+  with a `note` instead of rejected. Hidden/locked drawings and non-line types are excluded.
+  Reference = canonical quote price at the panel's latest REAL candle time
+  (`normalizeChartTimeToMs` in `timeConversion.ts` guards seconds vs ms — never wall clock).
+  Per-preset results live in `channelRiskRewardStore.autoByTimeframe` (computed centrally in
+  `ChannelRiskRewardPanel`); each `ChannelRiskRewardBadge` (in ChartCanvas) reads ONLY its own
+  preset. `activeChartPreset` (set by clicking a chart) drives the left panel and the AI context
+  (`chartTimeframe` field — only the active chart's channel is sent, never all six). Manual
+  selection remains as a collapsed fallback and MAY mix timeframes. Debug via
+  `VITE_CHANNEL_RR_DEBUG=true` (`[ChannelRR]` console.debug logs per-pair rejection reasons).
 - Naming convention: physical SQL tables use CODE-ONLY names (`C110`, never `C110_ChatConversaciones`);
   PK/FK columns are exactly `CxxxId` (`C110Id`, `C005Id` — never `C005ID`, `UserId`, `usuario_id`).
   Descriptive names (C110-ChatConversaciones) exist only in documentation.
@@ -121,21 +133,27 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
   (active users only; also sets the flag).
 - `PasswordHash` never leaves the API. JWT (`security/jwt.py`): sub=C005Id, username, is_admin.
 - ALL app endpoints require Bearer (market data included — wired via router `dependencies` in
-  `main.py`). Public: `/api/health`, `/api/health/db`, `/api/auth/login`,
-  `/api/auth/validate-password-token`, `/api/auth/set-password`.
+  `main.py`). The whole `auth.router` is mounted public (no router-level dep) — its protected
+  endpoints (`/auth/me`, `PATCH /auth/me`, `/auth/change-password`) enforce auth inside the
+  handler. No-auth endpoints: `/api/health`, `/api/health/db`, `/api/auth/login`,
+  `/api/auth/validate-password-token`, `/api/auth/set-password`, `/api/auth/reset-password`,
+  `/api/auth/forgot-password` (these last two are self-service recovery — see Auth rules). The
+  frontend `apiClient` PUBLIC_PATHS must list the same auth paths.
 - Every data repo call is scoped by `C005Id` — a user must never see another user's rows; drawing
   updates go through `get_owned()`. Last-active-admin protections: cannot deactivate or de-admin the
   last active admin.
 - `bcrypt` is pinned to 4.0.1 (passlib 1.7.4 compatibility); don't bump casually.
 
 ### Frontend auth wiring
-- Routes in `main.tsx`: `/login`, `/forgot-password`, `/set-password`, `/reset-password`,
-  `/account` (My Account: own profile + change password, every authenticated user),
-  `/change-password` (forced change), `/admin/users` (AdminRoute), `/*` (ProtectedRoute → App).
-  Token stored via `features/auth/authToken.ts` (`tap.auth.token.v1`) — a standalone module to
-  avoid import cycles; `authStore` (zustand) holds user/session state.
+- Routes in `main.tsx`: `/login`, `/forgot-password`, `/set-password`, `/reset-password` (public,
+  unauthenticated); then ProtectedRoute pages `/news` (NewsPage), `/market-movers`
+  (MarketMoversPage), `/account` (My Account: own profile + change password, every authenticated
+  user), `/change-password` (forced change), `/admin/users` (AdminRoute), `/*` (ProtectedRoute →
+  App). Token stored via `features/auth/authToken.ts` (`tap.auth.token.v1`) — a standalone module
+  to avoid import cycles; `authStore` (zustand) holds user/session state.
 - Separation of concerns: `/account` is personal (never lists other users); `/admin/users` is
-  admin-only user management. Header shows 👤 Mi cuenta (`account-link`) for everyone and
+  admin-only user management. Header links: 📰 Noticias (`news-link` → `/news`) and 🚀 Movers
+  (`movers-link` → `/market-movers`) for everyone, 👤 Mi cuenta (`account-link`) for everyone,
   ⚙ Usuarios (`admin-link`) only when `esAdmin`.
 - `services/apiClient.ts` attaches `Authorization: Bearer` and, on 401 from a non-public path, clears
   the token and redirects to `/login`. PUBLIC_PATHS must stay in sync with the backend's public list.
@@ -184,13 +202,18 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
   Performance: open entries use the canonical quote; CERRADA uses `PrecioSalida` (realized).
   Markers render as dashed price lines via the optional `ChartInstance.setSimulatedEntryLines`
   (optional so fake ChartInstance objects in tests don't break). Watchlist removal NEVER touches C050.
-- Channel R/R (`features/channelRiskReward/`) is FRONTEND-ONLY math over two user-selected
-  `free_line` drawings: `getLinePriceAtTime` interpolates/extrapolates in **ms** (never LWC seconds);
+  Frontend lives in `features/simulatedTrades/` (`SimulatedTradeModal` + `SimulatedTradesPanel`,
+  zustand store + Api service).
+- Channel R/R (`features/channelRiskReward/`) is FRONTEND-ONLY math over two ~parallel line
+  drawings: `getLinePriceAtTime` interpolates/extrapolates in **ms** (never LWC seconds);
   upper/lower swap automatically; reward<=0 / risk<=0 produce `invalidReason` instead of a ratio.
-  The result is published in `channelRiskRewardStore` and flows into BOTH AI prompts: the ChatGPT
-  prompt builder reads it at rebuild, and `aiChatStore.sendMessage` sends it as the optional
-  `channelRiskReward` field (merged into the model context server-side). Both AI contexts also
-  include `simulatedEntries`. Everything is labeled hypothetical — never investment advice.
+  Auto-detection runs per preset (strict `sourceTimeframe` scoping — see the invariant above);
+  the panel shows ONLY the active chart's channel (fallback: highest confidence) and the
+  effective `result` flows into BOTH AI prompts: the ChatGPT prompt builder reads it at rebuild,
+  and `aiChatStore.sendMessage` sends it as the optional `channelRiskReward` field (merged into
+  the model context server-side) — both include `chartTimeframe` (null under manual override).
+  Both AI contexts also include `simulatedEntries`. Everything is labeled hypothetical — never
+  investment advice.
 
 ### Timeframes are defined twice and must stay aligned
 The six presets — `4Y_1W` (weekly!), `1Y_1D`, `6M_1D`, `3M_1D`, `1M_1H`, `1W_30M` — are defined in

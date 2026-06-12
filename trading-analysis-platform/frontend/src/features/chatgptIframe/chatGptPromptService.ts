@@ -93,7 +93,9 @@ export function buildChatGptPrompt(
   type: ChatGptPromptType,
   context: ChatGptContext,
   toggles: ChatGptContextToggles,
-  channelRR?: ChannelRiskRewardResult | null
+  channelRR?: ChannelRiskRewardResult | null,
+  /** Temporalidad del canal AUTO-detectado (la deteccion es por preset). */
+  channelTimeframe?: string | null
 ): string {
   const lines: string[] = [];
   const symbol = context.symbol;
@@ -287,7 +289,9 @@ export function buildChatGptPrompt(
 
   if (channelRR) {
     lines.push("");
-    lines.push("Riesgo/beneficio de canal (hipotético, AUTO-detectado sobre mis líneas):");
+    lines.push(
+      `Riesgo/beneficio de canal (hipotético, AUTO-detectado sobre mis líneas${channelTimeframe ? ` de la temporalidad ${channelTimeframe}` : ""}):`
+    );
     lines.push(
       `- Referencia: ${channelRR.referenceType === "simulated_entry" ? "entrada simulada" : "precio actual"} @ ${fmt(channelRR.referencePrice)}`
     );

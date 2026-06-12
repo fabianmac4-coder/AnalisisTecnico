@@ -4,8 +4,10 @@ import { useSymbolStore } from "@/stores/symbolStore";
 import { useChartStore } from "@/stores/chartStore";
 import { resolveDisplayPrice } from "@/features/charting/priceResolver";
 import { useSimulatedTradesStore } from "@/features/simulatedTrades/simulatedTradesStore";
+import { normalizeChartTimeToMs } from "@/features/drawings/timeConversion";
+import { PRESET_KEYS, type PresetKey } from "@/utils/timeframes";
 import { ChannelLineSelector } from "./ChannelLineSelector";
-import { detectChannels } from "./channelAutoDetection";
+import { detectChannels, type DetectedChannel } from "./channelAutoDetection";
 import { computeChannelRiskReward } from "./channelRiskRewardMath";
 import {
   channelSummaryText,
@@ -14,10 +16,13 @@ import {
 import { useChannelRiskRewardStore } from "./channelRiskRewardStore";
 
 /**
- * Panel "R/R de canal". El flujo PRINCIPAL es la AUTO-DETECCION: el sistema
- * busca pares de lineas ~paralelas entre tus dibujos, decide cual es superior
- * e inferior por precio, y calcula el R/R hipotetico. La seleccion manual
- * queda como respaldo (colapsada). No es asesoria financiera.
+ * Panel "R/R de canal". El flujo PRINCIPAL es la AUTO-DETECCION POR
+ * TEMPORALIDAD: cada panel del dashboard detecta canales SOLO entre lineas
+ * cuyo sourceTimeframe coincide con su preset (un canal de 4Y_1W no calcula
+ * en 1Y_1D ni al reves). Este panel izquierdo muestra el canal de la grafica
+ * ACTIVA (ultimo panel clickeado; si no hay, el mejor disponible). La
+ * seleccion manual queda como respaldo (colapsada) y SI permite mezclar
+ * lineas de cualquier temporalidad visible. No es asesoria financiera.
  */
 export function ChannelRiskRewardPanel() {
   const symbol = useSymbolStore((s) => s.activeSymbol);
@@ -26,11 +31,13 @@ export function ChannelRiskRewardPanel() {
   const lowerDrawingId = useChannelRiskRewardStore((s) => s.lowerDrawingId);
   const referenceType = useChannelRiskRewardStore((s) => s.referenceType);
   const manualOverride = useChannelRiskRewardStore((s) => s.manualOverride);
+  const activeChartPreset = useChannelRiskRewardStore((s) => s.activeChartPreset);
   const setUpper = useChannelRiskRewardStore((s) => s.setUpper);
   const setLower = useChannelRiskRewardStore((s) => s.setLower);
   const swap = useChannelRiskRewardStore((s) => s.swap);
   const setReferenceType = useChannelRiskRewardStore((s) => s.setReferenceType);
   const setResult = useChannelRiskRewardStore((s) => s.setResult);
+  const setAutoByTimeframe = useChannelRiskRewardStore((s) => s.setAutoByTimeframe);
   const setAutoDetection = useChannelRiskRewardStore((s) => s.setAutoDetection);
   const setManualOverride = useChannelRiskRewardStore((s) => s.setManualOverride);
 
@@ -58,25 +65,67 @@ export function ChannelRiskRewardPanel() {
   );
 
   const openEntry = simTrades.find((t) => t.status === "ABIERTA" && t.visible);
-
-  // Referencia: precio actual (default) o entrada simulada abierta.
   const useSimEntry = referenceType === "simulated_entry" && openEntry;
-  const referencePrice = useSimEntry ? openEntry.entryPrice : currentPrice;
-  const targetTimeMs = useSimEntry
-    ? new Date(openEntry.entryDate).getTime()
-    : Date.now();
 
-  // ---- AUTO-DETECCION (flujo principal) ----
-  const auto = useMemo(() => {
-    if (referencePrice == null || freeLines.length < 2) {
-      return { best: null, alternates: [] as never[] };
+  // ---- AUTO-DETECCION POR TEMPORALIDAD (flujo principal) ----
+  // Referencia: precio canonico actual. Tiempo de referencia: la ULTIMA VELA
+  // REAL de cada panel (no el reloj), normalizada a ms por si acaso.
+  const autoByTimeframe = useMemo(() => {
+    const map: Partial<Record<PresetKey, DetectedChannel | null>> = {};
+    for (const preset of PRESET_KEYS) {
+      const bars = chartDataByPreset[preset]?.bars;
+      const lastBar = bars && bars.length > 0 ? bars[bars.length - 1] : null;
+      if (currentPrice == null || !lastBar || freeLines.length < 2) {
+        map[preset] = null;
+        continue;
+      }
+      const targetTimeMs = normalizeChartTimeToMs(lastBar.time);
+      map[preset] = detectChannels(freeLines, currentPrice, targetTimeMs, {
+        timeframe: preset,
+      }).best;
     }
-    return detectChannels(freeLines, referencePrice, targetTimeMs);
-  }, [freeLines, referencePrice, targetTimeMs]);
+    return map;
+  }, [freeLines, currentPrice, chartDataByPreset]);
 
-  // ---- Manual (respaldo) ----
+  // Temporalidad mostrada: la grafica ACTIVA (click) o, si el usuario aun no
+  // enfoco ninguna, la del canal con mayor confianza.
+  const shownPreset: PresetKey | null = useMemo(() => {
+    if (activeChartPreset) return activeChartPreset;
+    let bestKey: PresetKey | null = null;
+    let bestConf = -1;
+    for (const preset of PRESET_KEYS) {
+      const c = autoByTimeframe[preset];
+      if (c && c.confidence > bestConf) {
+        bestConf = c.confidence;
+        bestKey = preset;
+      }
+    }
+    return bestKey;
+  }, [activeChartPreset, autoByTimeframe]);
+
+  const activeAuto = shownPreset ? autoByTimeframe[shownPreset] ?? null : null;
+
+  // Con referencia "entrada simulada", el R/R del canal activo se recalcula
+  // sobre el precio/fecha de la entrada (los badges siguen con precio actual).
+  const activeAutoResult = useMemo(() => {
+    if (!activeAuto) return null;
+    if (!useSimEntry) return activeAuto.result;
+    return computeChannelRiskReward(
+      activeAuto.upper,
+      activeAuto.lower,
+      useSimEntry.entryPrice,
+      new Date(useSimEntry.entryDate).getTime(),
+      "simulated_entry"
+    );
+  }, [activeAuto, useSimEntry]);
+
+  // ---- Manual (respaldo; puede mezclar lineas de cualquier temporalidad) ----
+  const manualReferencePrice = useSimEntry ? useSimEntry.entryPrice : currentPrice;
+  const manualTargetTimeMs = useSimEntry
+    ? new Date(useSimEntry.entryDate).getTime()
+    : Date.now();
   const manualResult = useMemo(() => {
-    if (!manualOverride || referencePrice == null) return null;
+    if (!manualOverride || manualReferencePrice == null) return null;
     const upperDrawing = freeLines.find((d) => d.id === upperDrawingId);
     const lowerDrawing = freeLines.find((d) => d.id === lowerDrawingId);
     if (!upperDrawing || !lowerDrawing) return null;
@@ -86,24 +135,25 @@ export function ChannelRiskRewardPanel() {
     return computeChannelRiskReward(
       upper,
       lower,
-      referencePrice,
-      targetTimeMs,
+      manualReferencePrice,
+      manualTargetTimeMs,
       useSimEntry ? "simulated_entry" : "current_price"
     );
-  }, [manualOverride, freeLines, upperDrawingId, lowerDrawingId, referencePrice, targetTimeMs, useSimEntry]);
+  }, [manualOverride, freeLines, upperDrawingId, lowerDrawingId, manualReferencePrice, manualTargetTimeMs, useSimEntry]);
 
-  // El resultado EFECTIVO (manual si hay override, si no el auto-detectado)
-  // se publica para el badge de las graficas y los prompts de IA.
-  const effective = manualOverride ? manualResult : (auto.best?.result ?? null);
+  // El resultado EFECTIVO (manual si hay override; si no, el canal auto de la
+  // temporalidad activa) se publica para los prompts de IA.
+  const effective = manualOverride ? manualResult : activeAutoResult;
   const effectiveWithRef = effective
     ? { ...effective, referenceType: useSimEntry ? ("simulated_entry" as const) : ("current_price" as const) }
     : null;
 
   useEffect(() => {
-    setAutoDetection(auto.best, auto.alternates);
+    setAutoByTimeframe(autoByTimeframe);
+    setAutoDetection(activeAuto, []);
     setResult(effectiveWithRef);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto.best, auto.alternates, effective?.ratio, effective?.referencePrice, manualOverride]);
+  }, [autoByTimeframe, activeAuto, effective?.ratio, effective?.referencePrice, effective?.invalidReason, manualOverride]);
 
   if (!symbol) return null;
 
@@ -133,36 +183,52 @@ export function ChannelRiskRewardPanel() {
         R/R de canal {manualOverride ? "(manual)" : "(auto)"}
       </p>
 
+      {/* Temporalidad activa: el panel sigue a la grafica enfocada (click). */}
+      {!manualOverride && freeLines.length >= 2 && shownPreset && (
+        <p data-testid="channel-auto-timeframe" className="mb-1 text-[11px] text-gray-300">
+          Canal auto: <span className="font-mono">{shownPreset}</span>
+          {!activeChartPreset && (
+            <span className="text-muted"> (mejor disponible; clickea una gráfica)</span>
+          )}
+        </p>
+      )}
+
       {freeLines.length < 2 ? (
         <p data-testid="channel-rr-need-lines" className="text-[11px] text-muted">
           Dibuja dos líneas (Free Line / trendline) formando un canal: se
-          detectará automáticamente.
+          detectará automáticamente en la temporalidad donde las dibujes.
         </p>
-      ) : !manualOverride && !auto.best ? (
+      ) : !manualOverride && !activeAuto ? (
         <p data-testid="channel-rr-none" className="text-[11px] text-muted">
-          No se detectó un canal válido entre tus líneas (¿paralelas y con el
-          precio dentro?). Usa la selección manual si lo prefieres.
+          {shownPreset
+            ? `Sin canal auto-detectado en ${shownPreset}. Dibuja dos líneas ~paralelas en esa gráfica o usa la selección manual.`
+            : "Sin canal auto-detectado todavía. Dibuja dos líneas ~paralelas en una gráfica o usa la selección manual."}
         </p>
       ) : null}
 
-      {/* Canal auto-detectado */}
-      {!manualOverride && auto.best && (
+      {/* Canal auto-detectado (de la temporalidad activa) */}
+      {!manualOverride && activeAuto && (
         <div
           data-testid="channel-auto-section"
           className="rounded border border-edge bg-panel-2 p-2 text-[11px]"
         >
           <div className="flex justify-between text-gray-300">
             <span>Superior</span>
-            <span className="font-mono">{lineLabel(auto.best.upper.drawingId)}</span>
+            <span className="font-mono">{lineLabel(activeAuto.upper.drawingId)}</span>
           </div>
           <div className="flex justify-between text-gray-300">
             <span>Inferior</span>
-            <span className="font-mono">{lineLabel(auto.best.lower.drawingId)}</span>
+            <span className="font-mono">{lineLabel(activeAuto.lower.drawingId)}</span>
           </div>
           <div className="flex justify-between text-muted">
             <span>Confianza</span>
-            <span className="font-mono">{(auto.best.confidence * 100).toFixed(0)}%</span>
+            <span className="font-mono">{(activeAuto.confidence * 100).toFixed(0)}%</span>
           </div>
+          {activeAuto.note && (
+            <p data-testid="channel-rr-note" className="mt-1 text-[10px] text-amber-300/80">
+              {activeAuto.note}
+            </p>
+          )}
         </div>
       )}
 
@@ -240,7 +306,8 @@ export function ChannelRiskRewardPanel() {
         </select>
       )}
 
-      {/* Override manual (respaldo, colapsado por defecto) */}
+      {/* Override manual (respaldo, colapsado por defecto). A diferencia del
+          auto, aqui el usuario puede mezclar lineas de cualquier temporalidad. */}
       {freeLines.length >= 2 && (
         <details className="mt-1.5" open={manualOverride}>
           <summary
@@ -251,7 +318,7 @@ export function ChannelRiskRewardPanel() {
               setManualOverride(!manualOverride);
             }}
           >
-            Selección manual {manualOverride ? "(activa)" : ""}
+            Selección manual (respaldo) {manualOverride ? "(activa)" : ""}
           </summary>
           {manualOverride && (
             <div className="mt-1.5 space-y-1.5">

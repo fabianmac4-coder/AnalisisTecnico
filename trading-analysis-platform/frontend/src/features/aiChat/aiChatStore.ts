@@ -140,6 +140,10 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       const confidence = channelState.manualOverride
         ? null
         : channelState.autoBest?.confidence ?? null;
+      // El canal auto es POR TEMPORALIDAD: viaja solo el de la grafica activa.
+      const channelTimeframe = channelState.manualOverride
+        ? null
+        : channelState.autoBest?.timeframe ?? null;
       const res = await aiChatService.sendMessage(conversationId, {
         message,
         includeChartContext: state.includeChartContext,
@@ -147,7 +151,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         includeIndicators: state.includeIndicators,
         includeNews: state.includeNews,
         channelRiskReward: channelResult
-          ? channelResultForAi(channelResult, confidence)
+          ? channelResultForAi(channelResult, confidence, channelTimeframe)
           : undefined,
       });
       set((prev) => ({

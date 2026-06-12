@@ -38,7 +38,8 @@ export function channelSummaryText(result: ChannelRiskRewardResult): string {
 /** Forma compacta para inyectar al contexto de la IA. */
 export function channelResultForAi(
   result: ChannelRiskRewardResult,
-  confidence?: number | null
+  confidence?: number | null,
+  chartTimeframe?: string | null
 ): Record<string, unknown> {
   return {
     referenceType: result.referenceType,
@@ -49,7 +50,9 @@ export function channelResultForAi(
     potentialRiskPercent: result.potentialRiskPercent,
     ratio: result.ratio,
     invalidReason: result.invalidReason,
-    // Presente solo cuando el canal fue AUTO-detectado.
+    // Presentes solo cuando el canal fue AUTO-detectado (la deteccion es por
+    // temporalidad: este es el canal de la grafica activa, no una mezcla).
+    chartTimeframe: chartTimeframe ?? undefined,
     confidence: confidence ?? undefined,
     autoDetected: confidence != null,
   };
