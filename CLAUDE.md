@@ -55,11 +55,12 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - NEVER run `Base.metadata.create_all()` against SQL Server; tables exist. Schema changes go in
   idempotent scripts under `backend/sql/` run via `scripts/run_migrations.py`.
 - Tables: `dbo.C005` users, `C006` password tokens, `C010` acciones, `C0101` drawings, `C020`
-  indicator configs, `C030` layouts, `C040` user↔accion catalog, `C050` simulated/paper-trade
-  entries, `C060` cached news, `C061` news↔accion links, `C062` market-mover snapshots, `C063`
-  snapshot items, `C110` AI chat conversations, `C111` AI chat messages. Original tables have NO
-  IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1); ONLY the new
-  tables C006/C050/C060-C063/C110/C111 use IDENTITY.
+  indicator configs, `C030` layouts/analysis workspaces, `C040` user↔accion catalog, `C050`
+  simulated/paper-trade entries, `C060` cached news, `C061` news↔accion links, `C062` market-mover
+  snapshots, `C063` snapshot items, `C110` AI chat conversations, `C111` AI chat messages. Original
+  tables have NO IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1); ONLY
+  the new tables C006/C050/C060-C063/C110/C111 use IDENTITY. `C030` (no IDENTITY) gained `C010Id`
+  (nullable) + `Activo` via migration `009` — see "Analysis workspaces" below.
 - SQL Server does NOT support `NULLS LAST` — order with a portable
   `case((col.is_(None), 1), else_=0)` instead of `.nullslast()` (SQLite tests accept both, so only
   the real DB catches it).
@@ -110,12 +111,13 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
   with a `note` instead of rejected. Hidden/locked drawings and non-line types are excluded.
   Reference = canonical quote price at the panel's latest REAL candle time
   (`normalizeChartTimeToMs` in `timeConversion.ts` guards seconds vs ms — never wall clock).
-  Per-preset results live in `channelRiskRewardStore.autoByTimeframe` (computed centrally in
-  `ChannelRiskRewardPanel`); each `ChannelRiskRewardBadge` (in ChartCanvas) reads ONLY its own
-  preset. `activeChartPreset` (set by clicking a chart) drives the left panel and the AI context
-  (`chartTimeframe` field — only the active chart's channel is sent, never all six). Manual
-  selection remains as a collapsed fallback and MAY mix timeframes. Debug via
-  `VITE_CHANNEL_RR_DEBUG=true` (`[ChannelRR]` console.debug logs per-pair rejection reasons).
+  Results live in `channelRiskRewardStore.autoByTimeframe` keyed by timeframe key (computed centrally
+  in `ChannelRiskRewardPanel` by iterating the ACTIVE workspace's slot source-timeframe keys, falling
+  back to `PRESET_KEYS` when no workspace is loaded); each `ChannelRiskRewardBadge` (in ChartCanvas)
+  reads ONLY its own key. `activeChartPreset` (set by clicking a chart; now a `string` contextKey)
+  drives the left panel and the AI context (`chartTimeframe` field — only the active chart's channel
+  is sent, never all six). Manual selection remains as a collapsed fallback and MAY mix timeframes.
+  Debug via `VITE_CHANNEL_RR_DEBUG=true` (`[ChannelRR]` console.debug logs per-pair rejection reasons).
 - Naming convention: physical SQL tables use CODE-ONLY names (`C110`, never `C110_ChatConversaciones`);
   PK/FK columns are exactly `CxxxId` (`C110Id`, `C005Id` — never `C005ID`, `UserId`, `usuario_id`).
   Descriptive names (C110-ChatConversaciones) exist only in documentation.
@@ -234,7 +236,56 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 ### Timeframes are defined twice and must stay aligned
 The six presets — `4Y_1W` (weekly!), `1Y_1D`, `6M_1D`, `3M_1D`, `1M_1H`, `1W_30M` — are defined in
 `frontend/src/utils/timeframes.ts` AND `backend/app/timeframes.py` (same keys/intervals). Change both
-or neither. `4Y_1D` is a legacy key that migrations rewrite to `4Y_1W`.
+or neither. `4Y_1D` is a legacy key that migrations rewrite to `4Y_1W`. These six presets are now the
+DEFAULT analysis workspace's slot config (panels are per-workspace configurable — see next section);
+the `PresetKey` union and these files remain for back-compat (canonical-price fallback order, future
+whitespace step records, drawing migration, refresh tests).
+
+### Analysis workspaces & configurable chart slots (C030)
+The dashboard renders SIX panels, but each panel's range+interval is user-configurable and a stock can
+have MULTIPLE analysis workspaces (tabs). One `C030` row = one workspace.
+- **Storage**: `C030` rows are workspaces scoped by user+stock. Migration `009_chart_workspaces.sql`
+  added `C010Id` (nullable — NULL = legacy global UI layout consumed by `/layouts/default`; set = a
+  stock workspace) and `Activo` (soft delete). Six `{slotId,range,interval}` live in
+  `ConfiguracionJSON.chartSlots`. `LayoutsRepository.get_default_by_user` filters `C010Id IS NULL` so
+  the global layout never mixes with workspaces. Central backend module: `app/chart_workspaces.py`.
+- **Endpoints** (`routers/layouts.py`, auth, scoped by C005Id): `GET/POST /api/layouts/stock/{symbol}`
+  (GET auto-creates a "Default Analysis" if none; POST `{name, copyFromC030Id?}` — first workspace is
+  default), `PATCH /api/layouts/{c030Id}` (rename — `.strip()`, rejects empty 400; isDefault; config),
+  `PATCH …/chart-slots` (merge by slotId — preserves untouched slots), `PATCH …/set-default`, `DELETE`
+  (soft delete `Activo=0`; **409 on the LAST workspace**; reassigns default). Delete NEVER touches
+  drawings/indicators/trades/AI/watchlist/news.
+- **Range/interval are a SINGLE source of truth**: `AVAILABLE_INTERVALS_BY_RANGE` +
+  `DEFAULT_INTERVAL_BY_RANGE` exist in BOTH `backend/app/chart_workspaces.py` AND
+  `frontend/src/features/charts/chartRangeIntervalConfig.ts` — keep aligned. The interval dropdown
+  shows ONLY available intervals (NO disabled options); changing range auto-coerces an invalid
+  interval to the range default (with a toast). Invalid saved combos are repaired on load
+  (`normalizeChartSlots` / `merge_chart_slots`, both ends). `GET /api/market/candles?symbol&range&
+  interval` serves dynamic OHLCV (warmup supported); unsupported combos → **422**
+  `{error,message,range,interval,availableIntervals}` (the frontend pre-validates, so this is a safety net).
+- **contextKey & drawings**: a slot's "source timeframe" = `slotSourceTimeframe(slot)`. The SIX
+  DEFAULT combos map to the HISTORICAL preset keys (`5Y/1wk→4Y_1W`, `1Y/1d→1Y_1D`, …) so existing
+  drawings/channels/colors keep their identity WITHOUT migration; custom combos use the contextKey
+  `${range}_${interval}`. Timeframe-key types were WIDENED from the fixed `PresetKey` union to `string`
+  across drawings/colors/filters/futureWhitespace/channel/ChartCanvas/DrawingLayer; drawing filters
+  default unknown keys to VISIBLE (only an explicit `false` hides); whitespace step derives from the
+  interval token for non-preset keys.
+- **Stores**: `features/charts/chartWorkspaceStore.ts` holds `workspacesBySymbol` +
+  `activeWorkspaceBySymbol` (active selection persisted to `tradingPlatform.activeWorkspaceBySymbol`;
+  C030 is the source of truth for configs). `chartStore` is SLOT-based now:
+  `chartDataBySlot`/`loadingBySlot`/`errorBySlot` + `currentSlots`; `loadWorkspaceSlots` /
+  `reloadSlot` (single slot) / `refreshAllPresets` (refreshes the ACTIVE workspace's slots — name
+  kept so the refresh feature is untouched). `ChartGrid` renders the active workspace's slots +
+  `WorkspaceTabBar`; `symbolStore.selectSymbol` loads workspaces. Legacy preset fields remain on
+  `chartStore` (chartDataByPreset etc.) only for back-compat tests.
+- **UI**: `WorkspaceTabBar` renders the tabs; its `⋯` menu is in a **React portal** (must NOT be
+  clipped by the bar's `overflow-x-auto` — that was the original "can't rename/delete" bug). Rename is
+  inline; delete is a confirmation modal; duplicate makes `"{name} Copy"`. Per-panel
+  `SlotConfigSelector` (range + interval). Toasts via `components/ui/toastStore.ts` + `<Toaster/>`
+  (mounted in `AppShell`).
+- **AI context**: AI Chat sends an optional `workspace` field (active workspace name + its six slot
+  configs) → backend merges it as `activeWorkspace`; the ChatGPT prompt builder appends the same. Only
+  the ACTIVE workspace is sent, never inactive ones.
 
 ### Time units
 Storage, API responses, and `DrawingPoint.time` are **Unix milliseconds UTC**. Lightweight Charts uses
@@ -248,7 +299,9 @@ from `GET /api/market/quote` via `priceResolver.resolveDisplayPrice` (fallback o
 `1W_30M → 1M_1H → 3M_1D → 6M_1D → 1Y_1D → 4Y_1W`, computed once per symbol). Every chart series is
 created with `lastValueVisible:false, priceLineVisible:false`; the adapter draws a single canonical
 price line (`setCanonicalPriceLine(price, change)` — color green/red/gray by `quote.change`, empty
-title). Never derive a displayed price from a panel's last bar.
+title). Never derive a displayed price from a panel's last bar. Slot-based panels use
+`resolveDisplayPriceFromSlots(quote, slotData)` (quote first, then highest-resolution slot's last
+close); the preset-based `resolveDisplayPrice` remains for legacy callers/tests.
 
 ### Market data rules (backend `app/services/yahoo_service.py`)
 - Raw prices only: `auto_adjust=False`, never Adj Close. All responses declare `priceBasis: "raw"`.
@@ -257,8 +310,11 @@ title). Never derive a displayed price from a panel's last bar.
   OHLCV TTL 300s — see `app/config.py`, env prefix `TAP_`). `?forceRefresh=true` (quote/ohlcv) skips
   the cache READ but still writes the fresh result — used by the manual/auto refresh feature.
 - Refresh feature (`frontend/src/features/refresh/`): `refreshNow` → `chartStore.refreshAllPresets`
-  (NON-destructive: keeps old candles while loading and per-preset on failure; never clears charts)
-  + reloads simulated-trade performance. Auto-refresh: radio-style 5/10/15/20 min (min 5 — Yahoo rate
+  (now refreshes the ACTIVE workspace's slots; NON-destructive: keeps old candles while loading and
+  per-slot on failure; never clears charts) + reloads simulated-trade performance.
+- Dynamic candles: `GET /api/market/candles?symbol&range&interval` (warmup supported) backs the
+  per-slot loading; cache key reuses the OHLCV cache with the contextKey `${range}_${interval}` in the
+  PRESET slot. Unsupported range/interval → 422 (see "Analysis workspaces"). Auto-refresh: radio-style 5/10/15/20 min (min 5 — Yahoo rate
   safety), persisted at `tradingPlatform.autoRefreshIntervalMinutes`, timer in `useAutoRefresh`
   (mounted in App; dedupes via isRefreshing, skips ticks while the tab is hidden, refreshes once on
   return only if a full interval elapsed).
@@ -309,7 +365,8 @@ in/out); seconds conversion happens only in the `build*` functions. RSI is Wilde
 100/0/50 edge cases; MACD requires fast < slow (`validateIndicatorParams`).
 
 ### State & persistence
-Zustand stores: `chartStore` (per-preset OHLCV + quote per symbol), `symbolStore` (watchlist),
+Zustand stores: `chartStore` (per-SLOT OHLCV + quote per symbol; legacy per-preset fields kept for
+back-compat), `chartWorkspaceStore` (analysis workspaces; see that section), `symbolStore` (watchlist),
 `drawingStore`, `layoutStore` (filters/colors/indicators, persisted as `tap.ui.v1`, version 3).
 Components never touch localStorage directly — always via the repository classes. Critical zustand
 detail: persist `migrate` only runs on version mismatch, so `layoutStore` also has a custom `merge`

@@ -3,15 +3,14 @@
 // (en el toolbar del dashboard) deciden cuales se muestran.
 
 import type { Drawing } from "./drawingTypes";
-import type { PresetKey } from "@/utils/timeframes";
 import { normalizeTimeframeKey } from "./drawingMigration";
 
-export type DrawingVisibilityFilters = Record<PresetKey, boolean>;
+export type DrawingVisibilityFilters = Record<string, boolean>;
 
 export function getVisibleDrawingsForPanel(params: {
   drawings: Drawing[];
   activeSymbol: string;
-  panelTimeframe: PresetKey;
+  panelTimeframe: string;
   visibilityFilters: DrawingVisibilityFilters;
 }): Drawing[] {
   const { drawings, activeSymbol, panelTimeframe, visibilityFilters } = params;
@@ -19,8 +18,10 @@ export function getVisibleDrawingsForPanel(params: {
     if (d.symbol !== activeSymbol) return false;
     if (!d.visible) return false;
 
-    const source = normalizeTimeframeKey(d.sourceTimeframe) as PresetKey;
-    if (!visibilityFilters[source]) return false;
+    const source = normalizeTimeframeKey(d.sourceTimeframe);
+    // Solo un `false` EXPLICITO oculta; una temporalidad desconocida (combo
+    // personalizado sin chip) se considera visible por defecto.
+    if (visibilityFilters[source] === false) return false;
 
     // Visible en todas las temporalidades por defecto: solo un `false`
     // EXPLICITO restringe (un campo ausente en datos viejos cuenta como true).

@@ -5,11 +5,24 @@
 import { apiClient, ApiError, type OHLCVResponse, type QuoteResponse } from "./apiClient";
 import { PRESET_KEYS, type PresetKey } from "@/utils/timeframes";
 import type { SymbolInfo } from "@/features/symbols/symbolTypes";
+import type { ChartSlotConfig } from "@/features/charts/chartWorkspaceTypes";
 
 export interface PresetLoadResult {
   preset: PresetKey;
   data?: OHLCVResponse;
   error?: string;
+}
+
+/** Resultado de cargar UN slot de grafica (range/interval dinamicos). */
+export interface SlotLoadResult {
+  slotId: string;
+  data?: OHLCVResponse;
+  error?: string;
+}
+
+function errMessage(reason: unknown): string {
+  if (reason instanceof ApiError) return reason.message;
+  return (reason as Error)?.message ?? "Error desconocido";
 }
 
 export const marketDataService = {
@@ -48,6 +61,46 @@ export const marketDataService = {
       const message =
         reason instanceof ApiError ? reason.message : (reason as Error)?.message ?? "Error desconocido";
       return { preset, error: message };
+    });
+  },
+
+  /** OHLCV de un slot (range/interval dinamicos), con warmup para indicadores. */
+  async getCandles(
+    symbol: string,
+    range: string,
+    interval: string,
+    forceRefresh = false
+  ): Promise<OHLCVResponse> {
+    return apiClient.getCandles(symbol, range, interval, {
+      includeWarmup: true,
+      warmupBars: 260,
+      forceRefresh,
+    });
+  },
+
+  /**
+   * Carga los seis slots de un workspace en paralelo y tolerante a fallos
+   * parciales (Promise.allSettled): un slot con range/interval no soportado o
+   * sin datos no tumba a los demas. La clave del resultado es el slotId.
+   */
+  async loadAllSlots(
+    symbol: string,
+    slots: ChartSlotConfig[],
+    forceRefresh = false
+  ): Promise<SlotLoadResult[]> {
+    const settled = await Promise.allSettled(
+      slots.map((s) =>
+        apiClient.getCandles(symbol, s.range, s.interval, {
+          includeWarmup: true,
+          warmupBars: 260,
+          forceRefresh,
+        })
+      )
+    );
+    return settled.map((result, i) => {
+      const slotId = slots[i].slotId;
+      if (result.status === "fulfilled") return { slotId, data: result.value };
+      return { slotId, error: errMessage(result.reason) };
     });
   },
 

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { PRESET_KEYS, type PresetKey } from "@/utils/timeframes";
+import { PRESET_KEYS } from "@/utils/timeframes";
 import { DEFAULT_TIMEFRAME_DRAWING_COLORS } from "@/features/drawings/colors";
 import type { DrawingVisibilityFilters } from "@/features/drawings/drawingFilters";
 import {
@@ -26,15 +26,15 @@ interface LayoutState {
 
   // Filtros de visibilidad de dibujos por temporalidad de origen (global).
   drawingVisibilityFilters: DrawingVisibilityFilters;
-  // Color de dibujo por temporalidad de origen.
-  timeframeDrawingColors: Record<PresetKey, string>;
+  // Color de dibujo por temporalidad de origen (clave de preset o contextKey).
+  timeframeDrawingColors: Record<string, string>;
   // Indicadores globales (se aplican a las seis graficas).
   globalIndicators: GlobalIndicatorConfig[];
 
   toggleSidebar: () => void;
   setTheme: (theme: "dark" | "light") => void;
-  toggleDrawingTimeframe: (preset: PresetKey) => void;
-  setTimeframeColor: (preset: PresetKey, color: string) => void;
+  toggleDrawingTimeframe: (preset: string) => void;
+  setTimeframeColor: (preset: string, color: string) => void;
   toggleIndicator: (id: string) => void;
   /** Actualiza params y/o estilo de un indicador (recalcula y persiste). */
   updateIndicatorConfig: (

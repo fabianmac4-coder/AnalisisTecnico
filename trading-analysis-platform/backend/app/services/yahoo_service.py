@@ -168,14 +168,24 @@ def _download(symbol: str, preset: TimeframePreset) -> pd.DataFrame:
 
 # Dias de calendario aproximados por vela, para dimensionar el warmup.
 _WARMUP_STEP_DAYS: dict[str, float] = {
+    "1mo": 30.0,
     "1wk": 7.0,
     "1d": 1.0,
     "1h": 1 / 7,  # ~7 velas por dia de mercado
     "30m": 1 / 13,  # ~13 velas por dia de mercado
+    "15m": 1 / 26,
+    "5m": 1 / 78,
+    "1m": 1 / 390,
 }
 
 # Limites de historico intradiario de yfinance (con margen de seguridad).
-_INTRADAY_MAX_DAYS: dict[str, int] = {"1h": 700, "30m": 55}
+_INTRADAY_MAX_DAYS: dict[str, int] = {
+    "1h": 700,
+    "30m": 55,
+    "15m": 55,
+    "5m": 55,
+    "1m": 7,
+}
 
 
 def _download_with_warmup(
@@ -285,6 +295,157 @@ def get_ohlcv(
         symbol=symbol,
         preset=preset_key,
         interval=preset.interval,
+        priceBasis=PRICE_BASIS,
+        currency=currency,
+        timezone=tz,
+        bars=bars,
+        warmupBars=warmup,
+        visibleFrom=visible_from_ms if visible_from_ms is not None else bars[0].time,
+        visibleTo=bars[-1].time,
+    )
+    _cache.set(cache_key, response)
+    return response
+
+
+# --------------------------------------------------------------------------
+# Candles dinamicos: range + interval arbitrarios (workspaces de analisis).
+# Mismo pipeline de normalizacion/cache que los presets, pero la "key" de cache
+# es el contextKey f"{range}_{interval}".
+# --------------------------------------------------------------------------
+def _download_candles(symbol: str, query: "Any") -> pd.DataFrame:
+    """Descarga un DataFrame para una CandleQuery (period o start/end)."""
+    import yfinance as yf
+
+    last_err: Exception | None = None
+    for _ in range(settings.yahoo_max_retries + 1):
+        try:
+            kwargs: dict[str, Any] = {
+                "tickers": symbol,
+                "interval": query.interval,
+                **_BASE_DOWNLOAD_KWARGS,
+            }
+            if query.period is not None:
+                kwargs["period"] = query.period
+            else:
+                kwargs["start"] = query.start
+                kwargs["end"] = query.end
+            try:
+                return yf.download(**kwargs)
+            except TypeError:
+                safe = {
+                    k: v
+                    for k, v in kwargs.items()
+                    if k not in ("multi_level_index", "group_by", "actions", "prepost")
+                }
+                return yf.download(**safe)
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+    raise MarketDataError(str(last_err) if last_err else "Error desconocido")
+
+
+def _download_candles_with_warmup(
+    symbol: str, interval: str, visible_days: int, warmup_bars: int
+) -> tuple[pd.DataFrame, int]:
+    """Descarga visible + warmup en UNA llamada para un interval arbitrario."""
+    now = datetime.now(timezone.utc)
+    visible_start = now - timedelta(days=visible_days)
+
+    step = _WARMUP_STEP_DAYS.get(interval, 1.0)
+    warmup_days = int(warmup_bars * step * 1.6) + 5
+    start = visible_start - timedelta(days=warmup_days)
+
+    max_days = _INTRADAY_MAX_DAYS.get(interval)
+    if max_days is not None:
+        earliest = now - timedelta(days=max_days)
+        if start < earliest:
+            start = earliest  # warmup parcial: mejor algo que fallar
+
+    import yfinance as yf
+
+    last_err: Exception | None = None
+    for _ in range(settings.yahoo_max_retries + 1):
+        try:
+            kwargs: dict[str, Any] = {
+                "tickers": symbol,
+                "interval": interval,
+                "start": start,
+                "end": now,
+                **_BASE_DOWNLOAD_KWARGS,
+            }
+            try:
+                df = yf.download(**kwargs)
+            except TypeError:
+                safe = {
+                    k: v
+                    for k, v in kwargs.items()
+                    if k not in ("multi_level_index", "group_by", "actions", "prepost")
+                }
+                df = yf.download(**safe)
+            return df, int(visible_start.timestamp() * 1000)
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+    raise MarketDataError(str(last_err) if last_err else "Error desconocido")
+
+
+def get_candles(
+    symbol: str,
+    range_key: str,
+    interval: str,
+    include_warmup: bool = False,
+    warmup_bars: int = 0,
+    force_refresh: bool = False,
+) -> OHLCVResponse:
+    """OHLCV para un slot con range/interval arbitrarios.
+
+    Valida la combinacion contra los limites de yfinance (UnsupportedRangeInterval
+    -> el router responde 400). El campo `preset` lleva el contextKey
+    f"{range}_{interval}".
+    """
+    from app.chart_workspaces import (
+        context_key,
+        range_visible_span_days,
+        resolve_candle_query,
+        validate_range_interval,
+    )
+
+    symbol = symbol.strip().upper()
+    if not symbol:
+        raise SymbolNotFoundError("symbol vacio")
+
+    # Lanza UnsupportedRangeInterval (ValueError) si la combinacion no aplica.
+    validate_range_interval(range_key, interval)
+    ctx_key = context_key(range_key, interval)
+
+    effective_warmup = warmup_bars if include_warmup else 0
+    cache_key = make_market_key(
+        symbol, ctx_key, interval, PRICE_BASIS, effective_warmup
+    )
+    if not force_refresh:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    warmup: list = []
+    visible_from_ms: int | None = None
+    if effective_warmup > 0:
+        df, visible_from_ms = _download_candles_with_warmup(
+            symbol, interval, range_visible_span_days(range_key), effective_warmup
+        )
+        all_bars = normalize_ohlcv_dataframe(df)
+        bars = [b for b in all_bars if b.time >= visible_from_ms]
+        warmup = [b for b in all_bars if b.time < visible_from_ms]
+    else:
+        df = _download_candles(symbol, resolve_candle_query(range_key, interval))
+        bars = normalize_ohlcv_dataframe(df)
+
+    if not bars:
+        raise SymbolNotFoundError(f"Sin datos para {symbol} ({ctx_key})")
+
+    currency, tz = _resolve_meta(symbol)
+    response = OHLCVResponse(
+        symbol=symbol,
+        preset=ctx_key,
+        interval=interval,
         priceBasis=PRICE_BASIS,
         currency=currency,
         timezone=tz,

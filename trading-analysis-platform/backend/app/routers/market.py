@@ -3,6 +3,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.chart_workspaces import (
+    INTERVALS,
+    RANGES,
+    UnsupportedRangeInterval,
+)
 from app.schemas.market import OHLCVResponse, QuoteResponse
 from app.services import yahoo_service
 from app.timeframes import PRESETS_BY_KEY
@@ -58,6 +63,64 @@ def get_ohlcv(
         raise HTTPException(status_code=502, detail=f"Error de proveedor: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/candles", response_model=OHLCVResponse)
+def get_candles(
+    symbol: str = Query(..., min_length=1, description="Ticker, ej. AAPL"),
+    range: str = Query(..., description="Rango visible, ej. 1Y"),  # noqa: A002
+    interval: str = Query(..., description="Intervalo de vela, ej. 1d"),
+    includeWarmup: bool = Query(
+        False, description="Incluir velas previas para indicadores"
+    ),
+    warmupBars: int = Query(
+        260, ge=0, le=600, description="Cuantas velas de warmup pedir"
+    ),
+    forceRefresh: bool = Query(
+        False, description="Ignora el cache y pide datos frescos a Yahoo"
+    ),
+) -> OHLCVResponse:
+    """OHLCV para un slot con range/interval dinamicos (workspaces de analisis).
+
+    Combinaciones no soportadas por el proveedor (ej. 5Y/1m) devuelven 400 con
+    un mensaje claro; el frontend conserva los datos previos y avisa.
+    """
+    try:
+        return yahoo_service.get_candles(
+            symbol,
+            range,
+            interval,
+            include_warmup=includeWarmup,
+            warmup_bars=warmupBars,
+            force_refresh=forceRefresh,
+        )
+    except UnsupportedRangeInterval as exc:
+        # 422: el par range/interval no esta soportado. Devuelve los intervalos
+        # disponibles para que el frontend pueda corregir aun con estado obsoleto.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "UNSUPPORTED_RANGE_INTERVAL",
+                "message": str(exc),
+                "range": exc.range,
+                "interval": exc.interval,
+                "availableIntervals": exc.available_intervals,
+            },
+        ) from exc
+    except yahoo_service.SymbolNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except yahoo_service.MarketDataError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Error de proveedor: {exc}"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/ranges")
+def list_ranges() -> dict[str, list[str]]:
+    """Expone los ranges/intervals validos para que el frontend los alinee."""
+    return {"ranges": list(RANGES), "intervals": list(INTERVALS)}
 
 
 @router.get("/presets")

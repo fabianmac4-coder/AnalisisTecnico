@@ -5,7 +5,12 @@ import { useChartStore } from "@/stores/chartStore";
 import { resolveDisplayPrice } from "@/features/charting/priceResolver";
 import { useSimulatedTradesStore } from "@/features/simulatedTrades/simulatedTradesStore";
 import { normalizeChartTimeToMs } from "@/features/drawings/timeConversion";
-import { PRESET_KEYS, type PresetKey } from "@/utils/timeframes";
+import { PRESET_KEYS } from "@/utils/timeframes";
+import {
+  useChartWorkspaceStore,
+  selectActiveWorkspace,
+} from "@/features/charts/chartWorkspaceStore";
+import { slotSourceTimeframe } from "@/features/charts/chartWorkspaceTypes";
 import { ChannelLineSelector } from "./ChannelLineSelector";
 import { detectChannels, type DetectedChannel } from "./channelAutoDetection";
 import { computeChannelRiskReward } from "./channelRiskRewardMath";
@@ -43,7 +48,27 @@ export function ChannelRiskRewardPanel() {
 
   const quote = useChartStore((s) => (symbol ? s.quoteBySymbol[symbol] : undefined));
   const chartDataByPreset = useChartStore((s) => s.chartDataByPreset);
+  const chartDataBySlot = useChartStore((s) => s.chartDataBySlot);
+  const activeWorkspace = useChartWorkspaceStore((s) => selectActiveWorkspace(s, symbol));
   const currentPrice = resolveDisplayPrice(quote, chartDataByPreset).price;
+
+  // Fuentes de velas por temporalidad: del workspace activo (slots) si existe;
+  // si no, los presets historicos (compatibilidad / fallback).
+  const timeframeSources = useMemo<{ key: string; bars: { time: number }[] | undefined }[]>(
+    () => {
+      if (activeWorkspace) {
+        return activeWorkspace.chartSlots.map((slot) => ({
+          key: slotSourceTimeframe(slot),
+          bars: chartDataBySlot[slot.slotId]?.bars,
+        }));
+      }
+      return PRESET_KEYS.map((preset) => ({
+        key: preset,
+        bars: chartDataByPreset[preset]?.bars,
+      }));
+    },
+    [activeWorkspace, chartDataBySlot, chartDataByPreset]
+  );
   const simTrades = useSimulatedTradesStore((s) =>
     symbol ? s.tradesBySymbol[symbol] ?? [] : []
   );
@@ -71,37 +96,37 @@ export function ChannelRiskRewardPanel() {
   // Referencia: precio canonico actual. Tiempo de referencia: la ULTIMA VELA
   // REAL de cada panel (no el reloj), normalizada a ms por si acaso.
   const autoByTimeframe = useMemo(() => {
-    const map: Partial<Record<PresetKey, DetectedChannel | null>> = {};
-    for (const preset of PRESET_KEYS) {
-      const bars = chartDataByPreset[preset]?.bars;
+    const map: Partial<Record<string, DetectedChannel | null>> = {};
+    for (const src of timeframeSources) {
+      const bars = src.bars;
       const lastBar = bars && bars.length > 0 ? bars[bars.length - 1] : null;
       if (currentPrice == null || !lastBar || freeLines.length < 2) {
-        map[preset] = null;
+        map[src.key] = null;
         continue;
       }
       const targetTimeMs = normalizeChartTimeToMs(lastBar.time);
-      map[preset] = detectChannels(freeLines, currentPrice, targetTimeMs, {
-        timeframe: preset,
+      map[src.key] = detectChannels(freeLines, currentPrice, targetTimeMs, {
+        timeframe: src.key,
       }).best;
     }
     return map;
-  }, [freeLines, currentPrice, chartDataByPreset]);
+  }, [freeLines, currentPrice, timeframeSources]);
 
   // Temporalidad mostrada: la grafica ACTIVA (click) o, si el usuario aun no
   // enfoco ninguna, la del canal con mayor confianza.
-  const shownPreset: PresetKey | null = useMemo(() => {
+  const shownPreset: string | null = useMemo(() => {
     if (activeChartPreset) return activeChartPreset;
-    let bestKey: PresetKey | null = null;
+    let bestKey: string | null = null;
     let bestConf = -1;
-    for (const preset of PRESET_KEYS) {
-      const c = autoByTimeframe[preset];
+    for (const src of timeframeSources) {
+      const c = autoByTimeframe[src.key];
       if (c && c.confidence > bestConf) {
         bestConf = c.confidence;
-        bestKey = preset;
+        bestKey = src.key;
       }
     }
     return bestKey;
-  }, [activeChartPreset, autoByTimeframe]);
+  }, [activeChartPreset, autoByTimeframe, timeframeSources]);
 
   const activeAuto = shownPreset ? autoByTimeframe[shownPreset] ?? null : null;
 

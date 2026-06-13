@@ -6,8 +6,10 @@ export interface ChartLayout {
   id: string;
   name: string;
   isDefault: boolean;
-  /** Tipo de grafica preferido por temporalidad. */
+  /** Tipo de grafica preferido por temporalidad (legado). */
   chartTypeByPreset: Partial<Record<PresetKey, ChartType>>;
+  /** Tipo de grafica preferido por slotId del workspace (modelo actual). */
+  chartTypeBySlot?: Record<string, ChartType>;
   theme: "dark" | "light";
 }
 

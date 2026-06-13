@@ -1,7 +1,7 @@
 // Factory pura para construir un Drawing nuevo. Centraliza los valores por
 // defecto y el estilo segun el tipo de herramienta. Facil de testear.
 
-import { PRESET_KEYS, type PresetKey } from "@/utils/timeframes";
+import { PRESET_KEYS } from "@/utils/timeframes";
 import {
   DEFAULT_DRAWING_STYLE,
   type Drawing,
@@ -19,7 +19,7 @@ function uuid(): string {
 
 export interface CreateDrawingParams {
   symbol: string;
-  sourceTimeframe: PresetKey;
+  sourceTimeframe: string;
   type: DrawingType;
   points: DrawingPoint[];
   color?: string;

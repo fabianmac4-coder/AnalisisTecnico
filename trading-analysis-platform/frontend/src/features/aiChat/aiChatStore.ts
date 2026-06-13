@@ -4,6 +4,41 @@ import { create } from "zustand";
 import { aiChatService } from "./aiChatService";
 import type { AiConversation, AiMessage } from "./aiChatTypes";
 
+/**
+ * Construye el contexto del workspace de analisis ACTIVO para la IA: nombre,
+ * c030Id y los seis slots (range/interval + contextKey). Solo el workspace
+ * activo (nunca los inactivos). Devuelve undefined si no hay ninguno.
+ */
+async function buildActiveWorkspaceContext(): Promise<
+  Record<string, unknown> | undefined
+> {
+  try {
+    const { useChartStore } = await import("@/stores/chartStore");
+    const { useChartWorkspaceStore, selectActiveWorkspace } = await import(
+      "@/features/charts/chartWorkspaceStore"
+    );
+    const { slotContextKey } = await import(
+      "@/features/charts/chartWorkspaceTypes"
+    );
+    const symbol = useChartStore.getState().activeSymbol;
+    const ws = selectActiveWorkspace(useChartWorkspaceStore.getState(), symbol);
+    if (!ws) return undefined;
+    return {
+      c030Id: ws.c030Id,
+      name: ws.name,
+      symbol: ws.symbol,
+      chartContext: ws.chartSlots.map((s) => ({
+        slotId: s.slotId,
+        range: s.range,
+        interval: s.interval,
+        contextKey: slotContextKey(s),
+      })),
+    };
+  } catch {
+    return undefined; // el contexto del workspace nunca debe romper el envio
+  }
+}
+
 interface AiChatState {
   isOpen: boolean;
   /** Simbolo al que esta acotado el panel (ticker activo al abrirlo). */
@@ -144,6 +179,10 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       const channelTimeframe = channelState.manualOverride
         ? null
         : channelState.autoBest?.timeframe ?? null;
+
+      // Workspace de analisis activo: nombre + los seis slots (range/interval).
+      const workspace = await buildActiveWorkspaceContext();
+
       const res = await aiChatService.sendMessage(conversationId, {
         message,
         includeChartContext: state.includeChartContext,
@@ -153,6 +192,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         channelRiskReward: channelResult
           ? channelResultForAi(channelResult, confidence, channelTimeframe)
           : undefined,
+        workspace,
       });
       set((prev) => ({
         messagesByConversation: {

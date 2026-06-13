@@ -27,6 +27,8 @@ export interface SendMessagePayload {
   includeNews: boolean;
   /** R/R de canal hipotético calculado en el frontend (opcional). */
   channelRiskReward?: Record<string, unknown>;
+  /** Workspace de análisis activo (nombre + configuración de slots). */
+  workspace?: Record<string, unknown>;
 }
 
 export interface SendMessageResponse {

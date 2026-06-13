@@ -2,12 +2,18 @@ import { useMemo, useState } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { getPreset, type PresetKey } from "@/utils/timeframes";
+import {
+  INTERVAL_LABEL,
+  RANGE_LABEL,
+  isIntradayInterval,
+  slotSourceTimeframe,
+  type ChartSlotConfig,
+} from "@/features/charts/chartWorkspaceTypes";
 import { ChartCanvas, type OverlayLine } from "./ChartCanvas";
 import { ChartTypeSelector } from "./ChartTypeSelector";
 import { DrawingToolbar } from "@/features/drawings/DrawingToolbar";
 import { getVisibleDrawingsForPanel } from "@/features/drawings/drawingFilters";
-import { resolveDisplayPrice } from "./priceResolver";
+import { resolveDisplayPriceFromSlots } from "./priceResolver";
 import { MiniIndicatorChart, type IndicatorSeries } from "@/features/indicators/MiniIndicatorChart";
 import {
   bollinger,
@@ -20,7 +26,7 @@ import {
 } from "@/features/indicators/indicatorCalculations";
 
 interface Props {
-  preset: PresetKey;
+  slot: ChartSlotConfig;
   symbol: string;
   onClose: () => void;
 }
@@ -37,14 +43,16 @@ const OVERLAY_DEFS: { key: OverlayKey; label: string; color: string }[] = [
 ];
 
 /** Vista ampliada de una grafica con indicadores tecnicos. */
-export function ExpandedChartModal({ preset, symbol, onClose }: Props) {
-  const meta = getPreset(preset);
-  const data = useChartStore((s) => s.chartDataByPreset[preset]);
-  const chartType = useChartStore((s) => s.chartTypeByPreset[preset]);
-  const setChartType = useChartStore((s) => s.setChartType);
+export function ExpandedChartModal({ slot, symbol, onClose }: Props) {
+  const sourceTimeframe = slotSourceTimeframe(slot);
+  const metaLabel = `${RANGE_LABEL[slot.range]} / ${INTERVAL_LABEL[slot.interval]}`;
+  const intraday = isIntradayInterval(slot.interval);
+  const data = useChartStore((s) => s.chartDataBySlot[slot.slotId]);
+  const chartType = useChartStore((s) => s.chartTypeBySlot[slot.slotId]) ?? "candlestick";
+  const setSlotChartType = useChartStore((s) => s.setSlotChartType);
   const quote = useChartStore((s) => s.quoteBySymbol[symbol]);
-  const chartDataByPreset = useChartStore((s) => s.chartDataByPreset);
-  const canonicalPrice = resolveDisplayPrice(quote, chartDataByPreset).price;
+  const chartDataBySlot = useChartStore((s) => s.chartDataBySlot);
+  const canonicalPrice = resolveDisplayPriceFromSlots(quote, Object.values(chartDataBySlot));
   const allDrawings = useDrawingStore((s) => s.drawingsBySymbol[symbol]) ?? [];
   const visibilityFilters = useLayoutStore((s) => s.drawingVisibilityFilters);
   const timeframeColors = useLayoutStore((s) => s.timeframeDrawingColors);
@@ -64,7 +72,7 @@ export function ExpandedChartModal({ preset, symbol, onClose }: Props) {
   const drawings = getVisibleDrawingsForPanel({
     drawings: allDrawings,
     activeSymbol: symbol,
-    panelTimeframe: preset,
+    panelTimeframe: sourceTimeframe,
     visibilityFilters,
   });
 
@@ -108,9 +116,9 @@ export function ExpandedChartModal({ preset, symbol, onClose }: Props) {
         <div className="flex items-center justify-between border-b border-edge px-3 py-2">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-gray-100">
-              {symbol} · {meta.label}
+              {symbol} · {metaLabel}
             </span>
-            <ChartTypeSelector value={chartType} onChange={(t) => setChartType(preset, t)} />
+            <ChartTypeSelector value={chartType} onChange={(t) => setSlotChartType(slot.slotId, t)} />
           </div>
           <button onClick={onClose} className="rounded bg-panel-3 px-3 py-1 text-xs hover:bg-edge">
             Cerrar ✕
@@ -153,11 +161,11 @@ export function ExpandedChartModal({ preset, symbol, onClose }: Props) {
                 <ChartCanvas
                   candles={bars}
                   chartType={chartType}
-                  intraday={meta.intraday}
+                  intraday={intraday}
                   showVolume={chartType !== "volume"}
                   drawings={drawings}
                   symbol={symbol}
-                  sourceTimeframe={preset}
+                  sourceTimeframe={sourceTimeframe}
                   editable
                   overlays={overlays}
                   timeframeColors={timeframeColors}

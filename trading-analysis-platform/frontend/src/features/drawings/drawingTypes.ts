@@ -2,8 +2,6 @@
 // y precio reales, nunca en pixeles. Esto permite reproyectar un dibujo en
 // otra temporalidad (y dibujar en el area de "futuro" mas alla del ultimo bar).
 
-import type { PresetKey } from "@/utils/timeframes";
-
 export type DrawingType =
   | "free_line"
   | "dotted_line"
@@ -72,7 +70,9 @@ export interface DrawingStyle {
 export interface Drawing {
   id: string;
   symbol: string;
-  sourceTimeframe: PresetKey;
+  /** Temporalidad de origen: clave de preset historica o contextKey dinamico
+   *  (`${range}_${interval}`) cuando el slot usa un combo personalizado. */
+  sourceTimeframe: string;
   type: DrawingType;
   points: DrawingPoint[];
   style: DrawingStyle;

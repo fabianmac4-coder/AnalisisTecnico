@@ -91,6 +91,8 @@ class SendMessageRequest(BaseModel):
     # R/R de canal calculado en el frontend con los dibujos seleccionados
     # (hipotetico; se inyecta tal cual al contexto del modelo).
     channelRiskReward: dict | None = None
+    # Workspace de analisis activo (nombre + configuracion de los seis slots).
+    workspace: dict | None = None
 
 
 class SendMessageResponse(BaseModel):
@@ -231,6 +233,8 @@ def send_message(
         )
         if payload.channelRiskReward:
             context["channelRiskReward"] = payload.channelRiskReward
+        if payload.workspace:
+            context["activeWorkspace"] = payload.workspace
         context_text = ai_context_service.context_to_text(context)
     except Exception:  # noqa: BLE001 - el contexto nunca debe romper el chat
         context_text = f'{{"symbol": "{symbol}", "context_available": false}}'

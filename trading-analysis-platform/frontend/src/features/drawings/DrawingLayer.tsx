@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import type { ChartInstance } from "@/features/charting/chartEngine/ChartEngineAdapter";
 import { useDrawingStore } from "@/stores/drawingStore";
-import type { PresetKey } from "@/utils/timeframes";
 import {
   isTwoPointTool,
   type Drawing,
@@ -34,10 +33,10 @@ interface Props {
   drawings: Drawing[];
   editable: boolean;
   symbol: string;
-  sourceTimeframe: PresetKey;
+  sourceTimeframe: string;
   showTimeframeLabels?: boolean;
   /** Colores por temporalidad para resolver el color efectivo de cada dibujo. */
-  timeframeColors?: Record<PresetKey, string>;
+  timeframeColors?: Record<string, string>;
   /** Info del ultimo bar real para convertir clicks en el area futura. */
   futureInfo?: FutureConversionInfo | null;
   /**

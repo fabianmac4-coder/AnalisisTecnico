@@ -6,9 +6,8 @@ import {
 } from "./chartEngine/LightweightChartsAdapter";
 import type { Candle, ChartInstance, ChartType } from "./chartEngine/ChartEngineAdapter";
 import type { Drawing } from "@/features/drawings/drawingTypes";
-import type { PresetKey } from "@/utils/timeframes";
 import { DrawingLayer } from "@/features/drawings/DrawingLayer";
-import { createFutureWhitespace, PRESET_STEP_MS } from "./futureWhitespace";
+import { createFutureWhitespace, stepMsForTimeframe } from "./futureWhitespace";
 import { useSimulatedTradesStore } from "@/features/simulatedTrades/simulatedTradesStore";
 import { ChannelRiskRewardBadge } from "@/features/channelRiskReward/ChannelRiskRewardBadge";
 import { useChannelRiskRewardStore } from "@/features/channelRiskReward/channelRiskRewardStore";
@@ -28,11 +27,11 @@ interface Props {
   showVolume: boolean;
   drawings: Drawing[];
   symbol: string;
-  sourceTimeframe: PresetKey;
+  sourceTimeframe: string;
   editable: boolean;
   showTimeframeLabels?: boolean;
   overlays?: OverlayLine[];
-  timeframeColors?: Record<PresetKey, string>;
+  timeframeColors?: Record<string, string>;
   /** Precio canonico unico a mostrar en el eje de precio (igual en los 6). */
   canonicalPrice?: number | null;
   /** Cambio diario de la cotizacion (decide el color de la linea de precio). */
@@ -81,7 +80,7 @@ export function ChartCanvas({
     return {
       lastBarTimeMs: last.time,
       lastBarIndex: candles.length - 1,
-      stepMs: PRESET_STEP_MS[sourceTimeframe],
+      stepMs: stepMsForTimeframe(sourceTimeframe),
     };
   }, [candles, sourceTimeframe]);
 

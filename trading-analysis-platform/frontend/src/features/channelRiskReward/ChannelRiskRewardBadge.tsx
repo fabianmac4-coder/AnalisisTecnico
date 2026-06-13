@@ -1,10 +1,9 @@
-import type { PresetKey } from "@/utils/timeframes";
 import { useChannelRiskRewardStore } from "./channelRiskRewardStore";
 
 interface Props {
   /** Temporalidad del panel: el badge SOLO muestra el canal auto-detectado
    *  con lineas de ESTA temporalidad (TemporalidadOrigen === preset). */
-  preset: PresetKey;
+  preset: string;
 }
 
 /**

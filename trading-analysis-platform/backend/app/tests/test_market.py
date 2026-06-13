@@ -259,3 +259,95 @@ def test_warmup_cache_key_is_distinct():
     assert base != warm
     assert base == "ohlcv:AAPL:1Y_1D:1d:raw"  # sin warmup, clave intacta
     assert warm.endswith(":w260")
+
+
+# --------------------------------------------------------------------------
+# Endpoint /market/candles: range/interval dinamicos (workspaces de analisis).
+# --------------------------------------------------------------------------
+def test_candles_dynamic_range_interval(monkeypatch):
+    yahoo_service.clear_cache()
+    monkeypatch.setattr(
+        yahoo_service, "_download_candles", lambda s, q: _make_df()
+    )
+    monkeypatch.setattr(yahoo_service, "_resolve_meta", lambda s: ("USD", None))
+    res = client.get(
+        "/api/market/candles",
+        params={"symbol": "AAPL", "range": "1Y", "interval": "1d"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["symbol"] == "AAPL"
+    assert body["preset"] == "1Y_1d"  # contextKey = range_interval
+    assert body["interval"] == "1d"
+    assert body["priceBasis"] == "raw"
+    assert len(body["bars"]) == 3
+
+
+def test_candles_unsupported_combo_returns_422(monkeypatch):
+    yahoo_service.clear_cache()
+    # 5Y con velas de 1 minuto: no disponible -> 422 con intervalos validos.
+    res = client.get(
+        "/api/market/candles",
+        params={"symbol": "AAPL", "range": "5Y", "interval": "1m"},
+    )
+    assert res.status_code == 422
+    detail = res.json()["detail"]
+    assert detail["error"] == "UNSUPPORTED_RANGE_INTERVAL"
+    assert detail["range"] == "5Y"
+    assert detail["interval"] == "1m"
+    assert detail["availableIntervals"] == ["1mo", "1wk", "1d"]
+
+
+def test_candles_invalid_range_returns_422():
+    res = client.get(
+        "/api/market/candles",
+        params={"symbol": "AAPL", "range": "10Y", "interval": "1d"},
+    )
+    assert res.status_code == 422
+
+
+def test_candles_symbol_not_found(monkeypatch):
+    yahoo_service.clear_cache()
+    monkeypatch.setattr(
+        yahoo_service, "_download_candles", lambda s, q: pd.DataFrame()
+    )
+    res = client.get(
+        "/api/market/candles",
+        params={"symbol": "ZZZZ", "range": "1Y", "interval": "1d"},
+    )
+    assert res.status_code == 404
+
+
+def test_candles_warmup_split(monkeypatch):
+    yahoo_service.clear_cache()
+    cutoff_ms = int(pd.Timestamp("2024-06-01", tz="UTC").timestamp() * 1000)
+    monkeypatch.setattr(
+        yahoo_service,
+        "_download_candles_with_warmup",
+        lambda s, interval, days, w: (_make_long_df(), cutoff_ms),
+    )
+    monkeypatch.setattr(yahoo_service, "_resolve_meta", lambda s: ("USD", None))
+    res = client.get(
+        "/api/market/candles",
+        params={
+            "symbol": "AAPL",
+            "range": "1Y",
+            "interval": "1d",
+            "includeWarmup": "true",
+            "warmupBars": 200,
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["visibleFrom"] == cutoff_ms
+    assert len(body["warmupBars"]) == 3
+    assert len(body["bars"]) == 3
+    assert all(b["time"] < cutoff_ms for b in body["warmupBars"])
+
+
+def test_ranges_endpoint_lists_options():
+    res = client.get("/api/market/ranges")
+    assert res.status_code == 200
+    body = res.json()
+    assert "5Y" in body["ranges"]
+    assert "1m" in body["intervals"]

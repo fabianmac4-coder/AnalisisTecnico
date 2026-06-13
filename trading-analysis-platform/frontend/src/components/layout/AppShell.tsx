@@ -5,6 +5,7 @@ import { ChartGrid } from "@/features/charting/ChartGrid";
 import { AiChatPanel } from "@/features/aiChat/AiChatPanel";
 import { ChatGptIframePanel } from "@/features/chatgptIframe/ChatGptIframePanel";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { Toaster } from "@/components/ui/Toaster";
 import { useLayoutStore } from "@/stores/layoutStore";
 
 /**
@@ -31,6 +32,7 @@ export function AppShell() {
       <ErrorBoundary variant="panel">
         <ChatGptIframePanel />
       </ErrorBoundary>
+      <Toaster />
     </div>
   );
 }

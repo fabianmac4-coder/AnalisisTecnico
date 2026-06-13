@@ -95,7 +95,12 @@ export function buildChatGptPrompt(
   toggles: ChatGptContextToggles,
   channelRR?: ChannelRiskRewardResult | null,
   /** Temporalidad del canal AUTO-detectado (la deteccion es por preset). */
-  channelTimeframe?: string | null
+  channelTimeframe?: string | null,
+  /** Workspace de análisis activo (nombre + seis slots range/interval). */
+  workspace?: {
+    name: string;
+    chartContext: { slotId: string; range: string; interval: string }[];
+  } | null
 ): string {
   const lines: string[] = [];
   const symbol = context.symbol;
@@ -304,6 +309,16 @@ export function buildChatGptPrompt(
       lines.push(`- Riesgo potencial: -${fmt(channelRR.potentialRiskPercent)}%`);
       lines.push(`- Ratio R/R: ${fmt(channelRR.ratio)} : 1`);
     }
+  }
+
+  if (workspace) {
+    lines.push("");
+    lines.push(`Workspace de análisis activo: ${workspace.name}`);
+    lines.push(
+      `Configuración de las seis gráficas: ${workspace.chartContext
+        .map((s, i) => `Chart ${i + 1} = ${s.range}/${s.interval}`)
+        .join(", ")}`
+    );
   }
 
   if (toggles.includeTimeframeSummary && context.timeframes?.length) {

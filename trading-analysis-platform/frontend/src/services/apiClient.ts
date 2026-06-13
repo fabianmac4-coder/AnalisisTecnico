@@ -11,7 +11,8 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export interface OHLCVResponse {
   symbol: string;
-  preset: PresetKey;
+  /** PresetKey heredado o contextKey dinamico (`${range}_${interval}`). */
+  preset: string;
   interval: string;
   priceBasis?: string;
   currency?: string | null;
@@ -129,6 +130,22 @@ export const apiClient = {
     }
     if (opts?.forceRefresh) q.set("forceRefresh", "true");
     return request<OHLCVResponse>(`/market/ohlcv?${q.toString()}`);
+  },
+
+  /** OHLCV dinamico por range/interval (workspaces de analisis). */
+  getCandles(
+    symbol: string,
+    range: string,
+    interval: string,
+    opts?: { includeWarmup?: boolean; warmupBars?: number; forceRefresh?: boolean }
+  ): Promise<OHLCVResponse> {
+    const q = new URLSearchParams({ symbol, range, interval });
+    if (opts?.includeWarmup) {
+      q.set("includeWarmup", "true");
+      q.set("warmupBars", String(opts.warmupBars ?? 260));
+    }
+    if (opts?.forceRefresh) q.set("forceRefresh", "true");
+    return request<OHLCVResponse>(`/market/candles?${q.toString()}`);
   },
 
   getQuote(symbol: string, opts?: { forceRefresh?: boolean }): Promise<QuoteResponse> {

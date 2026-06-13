@@ -54,6 +54,43 @@ define su contraseña mediante un **enlace enviado por correo**.
   > Las respuestas de la IA son análisis informativo; **no son asesoría
   > financiera**.
 
+## Gráficas personalizables y workspaces de análisis
+
+El dashboard mantiene **seis paneles de gráfica**, pero cada panel es
+**configurable de forma independiente** y se puede tener **varios workspaces
+(pestañas) de análisis por acción**.
+
+- **Rango / intervalo por panel.** Cada uno de los seis paneles elige su propio
+  rango visible y temporalidad de vela con los selectores de su cabecera:
+  - Rangos: `5Y`, `1Y`, `6M`, `3M`, `1M`, `1W`, `1D`.
+  - Intervalos: `1mo`, `1wk`, `1d`, `1h`, `30m`, `15m`, `5m`, `1m`.
+  - Cambiar el rango/intervalo afecta **solo** ese panel del workspace activo
+    (se guarda en `C030.ConfiguracionJSON`) y recarga **solo** ese panel.
+- **Workspaces por acción.** Encima de las gráficas, una barra de pestañas
+  permite **crear, cambiar, renombrar, duplicar, marcar por defecto y eliminar**
+  workspaces. Ejemplo para `AAPL`:
+  - `Long-term` → seis gráficas de largo plazo (5Y/1mo, 5Y/1wk, 1Y/1d…).
+  - `Short-term` → seis gráficas de corto plazo (1Y/1h, 6M/30m, 3M/15m…).
+  - Cambiar la gráfica 1 de `Long-term` **no** afecta a `Short-term`.
+- **Persistencia.** Los workspaces se guardan por **usuario + acción** en
+  `dbo.C030` (`GET/POST /api/layouts/stock/{symbol}`, `PATCH/DELETE
+  /api/layouts/{c030Id}`, `PATCH …/chart-slots`, `PATCH …/set-default`).
+  Sobreviven a refrescos de página y a cerrar/abrir sesión. Al abrir una acción
+  sin workspaces se crea automáticamente un **"Default Analysis"**.
+- **Eliminar un workspace** solo borra (suave, `C030.Activo=0`) esa fila: **no**
+  toca dibujos, indicadores, entradas simuladas, chats de IA ni watchlist. No se
+  permite borrar el último workspace de una acción.
+- **Dibujos y Channel R/R por contexto.** La temporalidad de origen de un panel
+  es su `contextKey` `range_interval` (los seis combos por defecto conservan las
+  claves históricas `4Y_1W`/`1Y_1D`/… para no perder dibujos previos). Dos
+  paneles con el mismo rango/intervalo comparten dibujos; combos distintos
+  quedan separados. El Channel R/R y el contexto de IA usan el workspace activo.
+- **Yahoo Finance.** Algunas combinaciones rango/intervalo no están soportadas
+  por el proveedor (p. ej. `5Y/1m`): el panel muestra un **aviso limpio** y
+  conserva los datos previos en lugar de romperse. Los selectores deshabilitan
+  las combinaciones inválidas. Endpoint: `GET
+  /api/market/candles?symbol=AAPL&range=1Y&interval=1d`.
+
 ## Estructura
 
 ```
@@ -152,6 +189,10 @@ Los scripts de `backend/sql/` son **idempotentes** (se pueden re-ejecutar):
   guarda el **hash** del token, nunca el token en claro).
 - `004_ai_chat.sql` — crea `dbo.C110` (ChatConversaciones) y `dbo.C111`
   (ChatMensajes) para el AI Chat, con FKs a `C005`/`C010` e índices.
+- `009_chart_workspaces.sql` — agrega a `C030` las columnas `C010Id` (nullable,
+  retrocompatible con layouts globales) y `Activo` (borrado suave), la FK
+  `FK_C030_C010` y el índice `IX_C030_C005Id_C010Id`, para los **workspaces de
+  análisis por acción**.
 
 ```powershell
 cd backend
@@ -524,7 +565,7 @@ la instancia). Tablas:
 | `dbo.C010` | Acciones (tickers) | `TickerNormalizado` computada. Se auto-registra el ticker al guardar el primer dibujo. |
 | `dbo.C0101` | Dibujos | Por usuario y acción. **Borrado suave** (`Eliminado=1`). Puntos/estilo como JSON (time en ms + price). |
 | `dbo.C020` | Config. de indicadores | `C010Id NULL` = configuración global del usuario. |
-| `dbo.C030` | Layouts | Un layout "Default" por usuario (`ConfiguracionJSON`). |
+| `dbo.C030` | Layouts / **workspaces** | Layout global heredado (`C010Id NULL`) **y** workspaces de análisis por usuario + acción (`C010Id` fijo, `Activo` para borrado suave). Cada fila = un workspace con seis slots en `ConfiguracionJSON`. |
 | `dbo.C040` | Catálogo usuario-acción | Watchlist con favoritos/tags; quitar = `Activo=0`. |
 
 Las tablas originales **no tienen IDENTITY**: los IDs se asignan con

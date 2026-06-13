@@ -2,6 +2,10 @@
 
 import { create } from "zustand";
 import { useChannelRiskRewardStore } from "@/features/channelRiskReward/channelRiskRewardStore";
+import {
+  useChartWorkspaceStore,
+  selectActiveWorkspace,
+} from "@/features/charts/chartWorkspaceStore";
 import { buildChatGptPrompt, fetchChatGptContext } from "./chatGptPromptService";
 import type {
   ChatGptContext,
@@ -39,6 +43,21 @@ function rebuild(state: ChatGptIframeState): string {
   const channelTimeframe = channelState.manualOverride
     ? null
     : channelState.autoBest?.timeframe ?? null;
+  // Workspace de análisis activo (nombre + seis slots range/interval).
+  const ws = selectActiveWorkspace(
+    useChartWorkspaceStore.getState(),
+    state.activeSymbol
+  );
+  const workspace = ws
+    ? {
+        name: ws.name,
+        chartContext: ws.chartSlots.map((s) => ({
+          slotId: s.slotId,
+          range: s.range,
+          interval: s.interval,
+        })),
+      }
+    : null;
   return buildChatGptPrompt(
     state.activePromptType,
     state.context,
@@ -51,7 +70,8 @@ function rebuild(state: ChatGptIframeState): string {
       includeTimeframeSummary: state.includeTimeframeSummary,
     },
     channelRR,
-    channelTimeframe
+    channelTimeframe,
+    workspace
   );
 }
 
