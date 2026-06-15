@@ -36,9 +36,12 @@ export class LocalStorageDrawingRepository implements DrawingRepository {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }
 
-  async listBySymbol(symbol: string): Promise<Drawing[]> {
+  async listBySymbol(symbol: string, c030Id?: number): Promise<Drawing[]> {
     const data = this.read();
-    return data[symbol] ?? [];
+    const list = data[symbol] ?? [];
+    // Aislamiento por workspace: si se pide un c030Id, solo sus dibujos.
+    if (c030Id != null) return list.filter((d) => d.c030Id === c030Id);
+    return list;
   }
 
   async upsert(drawing: Drawing): Promise<Drawing> {

@@ -70,6 +70,9 @@ export interface DrawingStyle {
 export interface Drawing {
   id: string;
   symbol: string;
+  /** Workspace de analisis (C030Id) dueno del dibujo. Aisla los dibujos por
+   *  workspace; ausente solo en dibujos heredados (pre-workspaces). */
+  c030Id?: number;
   /** Temporalidad de origen: clave de preset historica o contextKey dinamico
    *  (`${range}_${interval}`) cuando el slot usa un combo personalizado. */
   sourceTimeframe: string;

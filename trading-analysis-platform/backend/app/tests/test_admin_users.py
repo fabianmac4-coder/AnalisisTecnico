@@ -106,8 +106,8 @@ def test_send_password_reset_marks_user(client, db_session):
 # ===== Aislamiento de datos por usuario (C005Id) =====
 
 
-def _drawing_payload(symbol: str = "AAPL") -> dict:
-    return {
+def _drawing_payload(symbol: str = "AAPL", c030_id: int | None = None) -> dict:
+    payload = {
         "symbol": symbol,
         "sourceTimeframe": "1Y_1D",
         "type": "free_line",
@@ -118,6 +118,15 @@ def _drawing_payload(symbol: str = "AAPL") -> dict:
         "showOnAllTimeframes": True,
         "version": 3,
     }
+    if c030_id is not None:
+        payload["c030Id"] = c030_id
+    return payload
+
+
+def _default_ws(client, headers, symbol: str = "AAPL") -> int:
+    return client.get(f"/api/layouts/stock/{symbol}", headers=headers).json()[0][
+        "c030Id"
+    ]
 
 
 def test_user_data_is_isolated_by_user(client, db_session):
@@ -127,7 +136,10 @@ def test_user_data_is_isolated_by_user(client, db_session):
     hb = login_headers(client, "UserB")
 
     # Dibujos
-    created = client.post("/api/drawings", json=_drawing_payload(), headers=ha)
+    ws_a = _default_ws(client, ha)
+    created = client.post(
+        "/api/drawings", json=_drawing_payload(c030_id=ws_a), headers=ha
+    )
     assert created.status_code == 201
     assert len(client.get("/api/drawings?symbol=AAPL", headers=ha).json()) == 1
     assert client.get("/api/drawings?symbol=AAPL", headers=hb).json() == []
@@ -163,7 +175,10 @@ def test_user_data_is_isolated_by_user(client, db_session):
 def test_drawing_delete_is_soft(client, db_session):
     make_user(db_session, "UserA", "a@example.com")
     ha = login_headers(client, "UserA")
-    created = client.post("/api/drawings", json=_drawing_payload(), headers=ha)
+    ws_a = _default_ws(client, ha)
+    created = client.post(
+        "/api/drawings", json=_drawing_payload(c030_id=ws_a), headers=ha
+    )
     drawing_id = created.json()["id"]
     assert client.delete(f"/api/drawings/{drawing_id}", headers=ha).status_code == 204
     assert client.get("/api/drawings?symbol=AAPL", headers=ha).json() == []

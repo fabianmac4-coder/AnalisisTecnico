@@ -20,6 +20,7 @@ from app.models.noticia import Noticia
 from app.models.noticia_instrumento import NoticiaInstrumento
 from app.models.lista_mercado import ListaMercado
 from app.models.lista_mercado_detalle import ListaMercadoDetalle
+from app.models.configuracion_scorecard import ConfiguracionScorecard
 
 __all__ = [
     "Usuario",
@@ -36,4 +37,5 @@ __all__ = [
     "NoticiaInstrumento",
     "ListaMercado",
     "ListaMercadoDetalle",
+    "ConfiguracionScorecard",
 ]

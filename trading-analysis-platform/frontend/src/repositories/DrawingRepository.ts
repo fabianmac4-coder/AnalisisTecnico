@@ -4,7 +4,9 @@ import type { Drawing } from "@/features/drawings/drawingTypes";
 // abstraccion, nunca de localStorage directamente. Manana puede existir una
 // implementacion que use la API del backend / base de datos.
 export interface DrawingRepository {
-  listBySymbol(symbol: string): Promise<Drawing[]>;
+  /** Lista los dibujos del símbolo; si se pasa `c030Id`, solo los de ese
+   *  workspace de análisis (aislamiento por workspace). */
+  listBySymbol(symbol: string, c030Id?: number): Promise<Drawing[]>;
   upsert(drawing: Drawing): Promise<Drawing>;
   remove(id: string): Promise<void>;
 }

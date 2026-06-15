@@ -9,6 +9,10 @@ import {
   slotSourceTimeframe,
   type ChartSlotConfig,
 } from "@/features/charts/chartWorkspaceTypes";
+import {
+  useChartWorkspaceStore,
+  selectActiveWorkspace,
+} from "@/features/charts/chartWorkspaceStore";
 import { ChartCanvas, type OverlayLine } from "./ChartCanvas";
 import { ChartTypeSelector } from "./ChartTypeSelector";
 import { DrawingToolbar } from "@/features/drawings/DrawingToolbar";
@@ -47,6 +51,9 @@ export function ExpandedChartModal({ slot, symbol, onClose }: Props) {
   const sourceTimeframe = slotSourceTimeframe(slot);
   const metaLabel = `${RANGE_LABEL[slot.range]} / ${INTERVAL_LABEL[slot.interval]}`;
   const intraday = isIntradayInterval(slot.interval);
+  const c030Id = useChartWorkspaceStore(
+    (s) => selectActiveWorkspace(s, symbol)?.c030Id
+  );
   const data = useChartStore((s) => s.chartDataBySlot[slot.slotId]);
   const chartType = useChartStore((s) => s.chartTypeBySlot[slot.slotId]) ?? "candlestick";
   const setSlotChartType = useChartStore((s) => s.setSlotChartType);
@@ -166,6 +173,7 @@ export function ExpandedChartModal({ slot, symbol, onClose }: Props) {
                   drawings={drawings}
                   symbol={symbol}
                   sourceTimeframe={sourceTimeframe}
+                  c030Id={c030Id}
                   editable
                   overlays={overlays}
                   timeframeColors={timeframeColors}

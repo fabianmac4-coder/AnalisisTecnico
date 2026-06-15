@@ -7,6 +7,7 @@ export type SimulatedTradeStatus = "ABIERTA" | "CERRADA";
 export interface SimulatedTrade {
   id: number;
   c010Id: number;
+  c030Id?: number | null;
   symbol: string;
   type: SimulatedTradeType;
   entryPrice: number;
@@ -28,8 +29,15 @@ export interface SimulatedTrade {
   visible: boolean;
 }
 
+/** Detalle con el snapshot de análisis (MetadataJSON / AnalisisJSON). */
+export interface SimulatedTradeDetail extends SimulatedTrade {
+  metadata?: Record<string, unknown> | null;
+  analysisSnapshot?: Record<string, unknown> | null;
+}
+
 export interface SimulatedTradeCreate {
   symbol: string;
+  c030Id?: number | null;
   type: SimulatedTradeType;
   entryPrice: number;
   quantity?: number | null;
@@ -38,4 +46,13 @@ export interface SimulatedTradeCreate {
   name?: string | null;
   notes?: string | null;
   color?: string | null;
+  // Tesis de la entrada (se guarda en AnalisisJSON.simulatedEntryThesis).
+  entryThesis?: string | null;
+  bullishScenario?: string | null;
+  bearishScenario?: string | null;
+  invalidationLevel?: string | number | null;
+  targetArea?: string | number | null;
+  // Contexto crudo del clic/gráfica y snapshot de análisis al crear.
+  metadata?: Record<string, unknown> | null;
+  analysisSnapshot?: Record<string, unknown> | null;
 }

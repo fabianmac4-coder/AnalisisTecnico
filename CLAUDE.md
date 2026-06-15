@@ -57,10 +57,12 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - Tables: `dbo.C005` users, `C006` password tokens, `C010` acciones, `C0101` drawings, `C020`
   indicator configs, `C030` layouts/analysis workspaces, `C040` user↔accion catalog, `C050`
   simulated/paper-trade entries, `C060` cached news, `C061` news↔accion links, `C062` market-mover
-  snapshots, `C063` snapshot items, `C110` AI chat conversations, `C111` AI chat messages. Original
-  tables have NO IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1); ONLY
-  the new tables C006/C050/C060-C063/C110/C111 use IDENTITY. `C030` (no IDENTITY) gained `C010Id`
-  (nullable) + `Activo` via migration `009` — see "Analysis workspaces" below.
+  snapshots, `C063` snapshot items, `C081` scorecard scoring configs, `C110` AI chat conversations,
+  `C111` AI chat messages. Original tables have NO IDENTITY → new IDs come from `next_id()`
+  (`repositories/sql_utils.py`, MAX+1); ONLY the new tables C006/C050/C060-C063/C081/C110/C111 use
+  IDENTITY. `C030` (no IDENTITY) gained `C010Id` (nullable) + `Activo` via migration `009`; `C0101`
+  gained `C030Id` (nullable, workspace-scoped drawings) via migration `010`; `C081` is created by
+  migration `011`. See "Analysis workspaces" and "Stock Scorecard" below.
 - SQL Server does NOT support `NULLS LAST` — order with a portable
   `case((col.is_(None), 1), else_=0)` instead of `.nullslast()` (SQLite tests accept both, so only
   the real DB catches it).
@@ -127,8 +129,8 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - Soft deletes only: users → `Activo=0` + `FechaDesactivacion`; drawings → `Eliminado=1`;
   catalog rows → `Activo=0`; AI conversations → `C110.Activo=0`. No physical DELETEs of user data,
   with ONE deliberate exception: `DELETE /api/admin/users/{id}/hard-delete` (purge test users:
-  children first — C111 (via the user's C110 ids) → C110 → C050/C006/C0101/C020/C030/C040 — then
-  C005, single transaction — `UsersRepository.hard_delete_user`; guards: not self, not the last
+  children first — C111 (via the user's C110 ids) → C110 → C081 → C050/C006/C0101/C020/C030/C040 —
+  then C005, single transaction — `UsersRepository.hard_delete_user`; guards: not self, not the last
   active admin; frontend requires typing DELETE).
 
 ### Auth rules
@@ -218,10 +220,29 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - `dbo.C050` = paper-trade entries per user+accion (LONG/SHORT, ABIERTA/CERRADA). API
   `/api/simulated-trades` (auth, scoped by C005Id); soft delete = `Activo=0 AND Visible=0`.
   Performance: open entries use the canonical quote; CERRADA uses `PrecioSalida` (realized).
-  Markers render as dashed price lines via the optional `ChartInstance.setSimulatedEntryLines`
-  (optional so fake ChartInstance objects in tests don't break). Watchlist removal NEVER touches C050.
-  Frontend lives in `features/simulatedTrades/` (`SimulatedTradeModal` + `SimulatedTradesPanel`,
-  zustand store + Api service).
+  Watchlist removal NEVER touches C050.
+- Chart marking is TWO layers (migration `012`): a SECONDARY dashed price line at the entry price
+  (`ChartInstance.setSimulatedEntryLines`) PLUS the PRIMARY exact-point marker
+  (`setSimulatedEntryMarkers`) — an arrow anchored to entry **time+price** (LONG=arrowUp/green
+  belowBar, SHORT=arrowDown/red aboveBar, label `TYPE price`). The adapter snaps each marker's ms
+  time to the NEAREST real candle of that chart (markers need a time present on the series) and
+  sorts ascending (LWC requirement). Both methods are OPTIONAL on the interface so fake
+  ChartInstance objects in tests don't break.
+- Workspace + analysis snapshot (migration `012` adds `C050.C030Id` NULL + `MetadataJSON` +
+  `AnalisisJSON`): entries are workspace-scoped like drawings — the panel loads `load(symbol,
+  c030Id)` for the active workspace (`loadedWorkspaceBySymbol`); the repo filters
+  `C030Id == c030_id OR C030Id IS NULL` (legacy rows visible everywhere). At creation
+  `captureAnalysisSnapshot(symbol)` (`simEntrySnapshot.ts`) reads the workspace/scorecard/channel
+  stores via `getState()` and builds `metadata` (chart/workspace/capturedAt) + `analysisSnapshot`
+  (`createdFrom:"SIM_ENTRY_TOOL"`, scorecard subset, real `technicalContext`, channelRiskReward).
+  The create modal also captures the **thesis** (entryThesis/bullishScenario/bearishScenario/
+  invalidationLevel/targetArea) → backend `_build_analysis_json` merges them under
+  `AnalisisJSON.simulatedEntryThesis`. `GET /simulated-trades/{id}` returns the detail
+  (`metadata`/`analysisSnapshot`); `PATCH` of thesis merges into `simulatedEntryThesis` WITHOUT
+  overwriting the rest of the snapshot. Frontend `features/simulatedTrades/`: `SimulatedTradeModal`
+  (preview + thesis + snapshot capture), `SimulatedTradeDetailModal` (snapshot vs current
+  comparison — 📍 Localizar makes the marker visible, 🔍 Análisis opens the detail),
+  `SimulatedTradesPanel`, zustand store (`openDetail`/`closeDetail`) + Api service.
 - Channel R/R (`features/channelRiskReward/`) is FRONTEND-ONLY math over two ~parallel line
   drawings: `getLinePriceAtTime` interpolates/extrapolates in **ms** (never LWC seconds);
   upper/lower swap automatically; reward<=0 / risk<=0 produce `invalidReason` instead of a ratio.
@@ -287,6 +308,39 @@ have MULTIPLE analysis workspaces (tabs). One `C030` row = one workspace.
   configs) → backend merges it as `activeWorkspace`; the ChatGPT prompt builder appends the same. Only
   the ACTIVE workspace is sent, never inactive ones.
 
+### Stock Scorecard (heurística, NO asesoría financiera)
+Resumen ejecutivo por acción: `GET /api/stocks/{symbol}/scorecard` (auth; query `forceRefresh`,
+`workspaceId`, `focusedChartSlotId`). `services/stock_scorecard_service.py` reutiliza los helpers de
+`ai_context_service` (mismas velas 1Y diarias) y puntua 0-100 técnico/fundamental/noticias/sentimiento;
+`overallScore` es promedio ponderado con pesos del config (REDISTRIBUYE cuando falta un componente).
+- **Config-driven** (`dbo.C081`, varias filas/perfiles por usuario): pesos + umbrales editables en
+  `ConfiguracionJSON`. `services/scorecard_config.py` tiene `DEFAULT_SCORECARD_CONFIG` (incluye
+  `sentiment.{vixLowRiskMax:16,vixMediumRiskMax:24,vixHighRiskAbove:30}` que consume
+  `_score_sentiment`) + `merge_with_default` (una config parcial/corrupta SIEMPRE se funde con el
+  default → nunca rompe el cálculo) + `validate_config`/`InvalidScorecardConfig` (pesos numéricos
+  ≥ 0 y total **100**). El servicio carga el default del usuario
+  (`ScorecardConfigRepository.get_or_create_default`) en cada cálculo. Endpoints CRUD:
+  `/api/scorecard/configs` (GET/POST), `…/configs/default`, `PATCH /configs/{id}`, `…/set-default`,
+  `POST /configs/reset-default` (restaura el default del sistema), `DELETE` (bloquea la última; soft
+  delete `Activo=0`). create/PATCH validan vía `_validated` → `422 {"error":
+  "INVALID_SCORECARD_CONFIG","message":...}` si los pesos no suman 100. Todo acotado por `C005Id`.
+- **Breakdown**: la respuesta incluye `breakdown.{technical,fundamentals,news,sentiment}.metrics[]` —
+  cada métrica reporta `value/displayValue/source/status (POSITIVE|NEUTRAL|NEGATIVE|MISSING)/
+  scoreContribution/maxContribution/explanation` — y `scoringConfig {c081Id,name,version}`. Sources:
+  Yahoo Finance / cálculo técnico interno / News module / Market data / User drawings. Fundamentales
+  via `yahoo_service.get_fundamentals` (`ticker.info`, NO ROIC.ai, NO proveedor de pago); campos
+  ausentes → status MISSING.
+- **Frontend** (`features/stockScorecard/`): tarjeta compacta en la sidebar + **vista completa VISUAL**
+  (`StockScorecardFullView`): puntaje general con barra + fila de 4 tarjetas de puntaje, y métricas
+  como `ScoreMetricCard` (estado por color, valor, barra de contribución `x / y pts`, fuente
+  abreviada) agrupadas por bloque (`TECHNICAL_GROUPS`/`FUNDAMENTAL_GROUPS`/`groupMetrics`). La pestaña
+  *Ajustes* (`ScorecardSettings`) edita pesos (con total + validación + botón **Normalizar a 100 %**),
+  umbrales técnicos/fundamentales/noticias/**sentimiento (^VIX)** y gestiona **perfiles**
+  (`ScorecardConfigSelector`: activo, Guardar, Guardar como nuevo, Fijar predeterminado, Restaurar
+  default). `stockScorecardStore` (por símbolo) + `scorecardConfigStore` (`defaultConfig`+`configs[]`,
+  con `weightsTotal`/`normalizeWeights`, `resetDefault`). El AI Chat (`buildScorecardExplainMessage`)
+  y el prompt de ChatGPT incluyen los valores reales del breakdown (`scorecardKeyMetricsLines`).
+
 ### Time units
 Storage, API responses, and `DrawingPoint.time` are **Unix milliseconds UTC**. Lightweight Charts uses
 **seconds** (`UTCTimestamp`). The only conversion source is
@@ -334,6 +388,14 @@ RSI/MACD are separate stacked `MiniIndicatorChart` instances under each panel. T
 - Stored as `{time(ms), price}` — never pixels — per user+symbol in SQL (`dbo.C0101`, via
   `ApiDrawingRepository`; localStorage repo only in test mode), rendered on an SVG overlay
   (`DrawingLayer.tsx`) with `pointer-events` active only while a tool is engaged.
+- **Isolated by workspace** (`C0101.C030Id`, migration `010`): each drawing belongs to ONE analysis
+  workspace; `GET /api/drawings?symbol&c030Id` loads only that workspace's rows (plus legacy
+  `C030Id IS NULL` ones, but ONLY when the active workspace is the stock's default). POST REQUIRES
+  `c030Id` (400 otherwise) and validates the workspace is the user's and matches the stock. The
+  frontend `drawingStore` holds the ACTIVE workspace's drawings keyed by symbol (replaced on tab
+  switch — see `ChartGrid` effect); `createDrawing` stamps `c030Id` from the active workspace
+  (threaded ChartPanel→ChartCanvas→DrawingLayer). Channel R/R therefore only sees active-workspace
+  drawings. The `DrawingIn.sourceTimeframe` schema is now a free `str` (custom slot contextKeys).
 - Global across all six charts: `showOnAllTimeframes !== false` means visible everywhere; the
   per-source-timeframe filter chips (layoutStore) gate visibility; `sourceTimeframe` controls default
   color (`colors.ts`) and the filter chip that governs it.

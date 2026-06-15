@@ -125,6 +125,10 @@ export interface ChatGptContextToggles {
   includeWatchlistNotes: boolean;
   includeFavoriteStatus: boolean;
   includeTimeframeSummary: boolean;
+  /** Opcional para retrocompatibilidad de pruebas; el store lo fija en true. */
+  includeScorecard?: boolean;
+  /** Incluir las métricas DETALLADAS del scorecard (valores reales). */
+  includeScorecardMetrics?: boolean;
 }
 
 // Config del iframe via variables de entorno del frontend (NUNCA API keys).

@@ -80,16 +80,99 @@ El dashboard mantiene **seis paneles de gráfica**, pero cada panel es
 - **Eliminar un workspace** solo borra (suave, `C030.Activo=0`) esa fila: **no**
   toca dibujos, indicadores, entradas simuladas, chats de IA ni watchlist. No se
   permite borrar el último workspace de una acción.
-- **Dibujos y Channel R/R por contexto.** La temporalidad de origen de un panel
-  es su `contextKey` `range_interval` (los seis combos por defecto conservan las
-  claves históricas `4Y_1W`/`1Y_1D`/… para no perder dibujos previos). Dos
-  paneles con el mismo rango/intervalo comparten dibujos; combos distintos
-  quedan separados. El Channel R/R y el contexto de IA usan el workspace activo.
+- **Dibujos AISLADOS por workspace.** Cada dibujo pertenece a un workspace
+  (`C0101.C030Id`): una línea creada en *Long-term* no aparece en *Short-term*.
+  Al cambiar de pestaña se recargan solo los dibujos de ese workspace; crear un
+  dibujo exige un workspace activo (el backend rechaza con 400 los dibujos sin
+  `C030Id`). Los dibujos heredados (sin workspace) se muestran solo en el
+  workspace por defecto de la acción y nunca se duplican. Dentro de un mismo
+  workspace, la temporalidad de origen de un panel es su `contextKey`
+  `range_interval` (los seis combos por defecto conservan las claves históricas
+  `4Y_1W`/`1Y_1D`/… para no perder dibujos previos). El Channel R/R usa los
+  dibujos del workspace activo y de la temporalidad de cada panel.
 - **Yahoo Finance.** Algunas combinaciones rango/intervalo no están soportadas
   por el proveedor (p. ej. `5Y/1m`): el panel muestra un **aviso limpio** y
   conserva los datos previos en lugar de romperse. Los selectores deshabilitan
   las combinaciones inválidas. Endpoint: `GET
   /api/market/candles?symbol=AAPL&range=1Y&interval=1d`.
+
+## Stock Scorecard (resumen ejecutivo por acción)
+
+Cada acción muestra en la sidebar una tarjeta compacta **"Stock Scorecard"** que
+resume, con datos YA disponibles en la plataforma, qué tan atractiva luce la
+acción ahora. **Es análisis informativo heurístico, NO asesoría financiera** y
+nunca da órdenes de compra/venta.
+
+- **Propósito**: responder de un vistazo si la acción luce técnicamente fuerte,
+  fundamentalmente razonable (con lo que expone Yahoo), si las noticias ayudan o
+  perjudican y si el entorno de mercado acompaña; y traducirlo en una **vista
+  general** (atractiva ahora / esperar pullback / mixta / riesgosa / datos
+  insuficientes…), **riesgo**, **confianza** y un **resumen en español**.
+- **Fuentes de datos** (todo ya presente, sin proveedores de pago):
+  - *Técnico*: mismas velas diarias (1Y + warmup) de las gráficas → SMA 20/50/200,
+    RSI, MACD, Bollinger, volumen y posición frente a soportes/resistencias.
+  - *Fundamentales básicos*: `ticker.info` de Yahoo (P/E, márgenes, ROE/ROA,
+    crecimiento, deuda/capital, valuación, dividendo…). **No usa ROIC.ai ni
+    ningún proveedor de fundamentales de pago.** Si faltan campos, se marcan como
+    parciales y baja la confianza.
+  - *Noticias*: el módulo de noticias por símbolo ya existente (keywords de
+    catalizadores positivos/negativos + frescura).
+  - *Sentimiento (proxies, Fase 1)*: tendencia de ^VIX y dirección del S&P 500 si
+    están disponibles; si no, `sentimentScore = null` con aviso (se ampliará en
+    la Fase 2). Incluye también tu contexto: notas del watchlist y entradas
+    simuladas (acotadas por usuario).
+- **Puntajes** 0-100: `technicalScore`, `fundamentalScore`, `newsScore`,
+  `sentimentScore` y un `overallScore` ponderado (técnico 40 % / fundamental
+  30 % / noticias 20 % / sentimiento 10 %; los pesos se **redistribuyen** si falta
+  algún componente).
+- **Vistas generales** (`overallView`): `ATTRACTIVE_NOW`,
+  `INTERESTING_BUT_WAIT_FOR_PULLBACK`, `FUNDAMENTALLY_GOOD_BUT_TECHNICALLY_EXTENDED`,
+  `TECHNICALLY_STRONG_BUT_FUNDAMENTALS_MIXED`, `MIXED_REQUIRES_CONFIRMATION`,
+  `RISKY_AVOID_FOR_NOW`, `INSUFFICIENT_DATA`.
+- **UI compacta**: tarjeta en la sidebar con badge de vista general, riesgo,
+  confianza, mini-puntajes y resumen; botones **Ver completo**, **Ver detalles**
+  (fortalezas / riesgos / a vigilar / disponibilidad / avisos), **Refrescar**,
+  **Explícame con IA** y **Copiar**. No tapa las gráficas.
+- **Vista completa VISUAL** (botón "Ver completo"): modal con el **puntaje
+  general** arriba (badge de vista/riesgo/confianza + barra de progreso) y una
+  fila de cuatro tarjetas (Técnico/Fundamental/Noticias/Sentimiento) con su barra
+  de puntaje. En vez de tablas planas, cada métrica se muestra como **tarjeta**
+  (`ScoreMetricCard`) agrupada por bloque temático (Tendencia/Momento/Riesgo-
+  Recompensa para técnico; Valuación/Rentabilidad/Crecimiento/Balance para
+  fundamentales), con **color** (verde/amarillo/rojo/gris), **valor**, **estado**
+  (Positivo/Neutral/Negativo/Sin dato), **contribución al puntaje** (ej.
+  `9 / 13 pts` con barra) y **fuente** abreviada (Técnico, Yahoo, Noticias,
+  Mercado, Dibujos). El backend devuelve esto en `breakdown` por sección; los
+  datos faltantes se manejan limpiamente como "Sin dato".
+- **Configuración de puntuación personalizable** (pestaña *Ajustes* /
+  "Configuración de Scorecard"): edita los **pesos** (técnico/fundamental/
+  noticias/sentimiento — deben sumar **100**: si no, hay error de validación y un
+  botón *Normalizar a 100 %*), los **umbrales técnicos** (RSI ideal/sobrecompra/
+  sobreventa, Canal R/R excelente/bueno/mínimo, estructura de medias),
+  **fundamentales** (P/E, ROE, ROA, margen, crecimiento, deuda/capital, current
+  ratio), **noticias** (antigüedad máxima, premio/castigo por titular) y
+  **sentimiento** (umbrales de ^VIX bajo/medio/alto). **Perfiles**: selector de
+  perfil activo, *Guardar*, *Guardar como nuevo perfil*, *Fijar como predeterminado*
+  y *Restaurar default del sistema*. Cada cambio **recalcula** el scorecard.
+  Se guarda por usuario en `dbo.C081` (`GET/POST /api/scorecard/configs`,
+  `…/configs/default`, `PATCH /configs/{id}`, `…/set-default`, `POST
+  /configs/reset-default`, `DELETE`). El backend **valida** la config (pesos
+  numéricos ≥ 0 y total 100, si no `422 INVALID_SCORECARD_CONFIG`); una config
+  parcial o corrupta se funde con el default (nunca rompe el cálculo).
+- **Integración con IA**: *Explícame con IA* abre el AI Chat del símbolo y
+  **precarga** un mensaje en español con los escenarios/riesgos/niveles **y los
+  valores reales** de las métricas. El generador de prompts de ChatGPT añade la
+  sección *Stock Scorecard* (toggle por defecto on) y un toggle "Métricas
+  detalladas" para incluir los valores del breakdown.
+- **Backend**: `GET /api/stocks/{symbol}/scorecard` (auth; query opcionales
+  `forceRefresh`, `workspaceId`, `focusedChartSlotId`; respuesta con `breakdown`
+  y `scoringConfig`). Se calcula on-demand con cache breve en memoria
+  (cotización/fundamentales). Datos del usuario (notas/operaciones/config)
+  acotados por `C005Id`.
+- **Limitaciones**: heurística simple y transparente, no un modelo de valuación
+  profesional; los fundamentales y el sentimiento pueden ser parciales; con datos
+  insuficientes la vista es `INSUFFICIENT_DATA`. Siempre etiquetado como **no
+  asesoría financiera**.
 
 ## Estructura
 
@@ -451,11 +534,28 @@ normalizada (sin parámetros de tracking).
 
 - **Entradas simuladas** (`dbo.C050`, panel "Entradas simuladas" del sidebar):
   marca *"hipotéticamente entré aquí"* con precio/tipo (LONG/SHORT)/cantidad/
-  notas/color. Se dibujan como línea punteada al precio de entrada en las seis
-  gráficas, persisten en SQL y el panel muestra P/L no realizado (%, monto y
-  días desde la entrada) con el precio canónico actual. Acciones: cerrar (P/L
-  realizado con precio de salida), ocultar/mostrar, eliminar (borrado suave
-  `Activo=0`). Quitar el ticker del watchlist NO borra las entradas.
+  notas/color. **Marcador EXACTO en la gráfica**: además de la línea punteada al
+  precio (ahora secundaria), se dibuja una **flecha anclada al tiempo + precio de
+  entrada** (▲ verde abajo para LONG, ▼ roja arriba para SHORT, con etiqueta
+  tipo+precio) sobre el bar real más cercano de cada temporalidad. Persisten en
+  SQL y el panel muestra P/L no realizado (%, monto y días desde la entrada) con
+  el precio canónico actual. Acciones: **📍 Localizar** (asegura el marcador
+  visible en las gráficas), **🔍 Análisis** (abre el detalle con el snapshot),
+  cerrar (P/L realizado con precio de salida), ocultar/mostrar, eliminar (borrado
+  suave `Activo=0`). Quitar el ticker del watchlist NO borra las entradas.
+- **Snapshot de análisis al crear** (workspace + contexto): cada entrada guarda
+  su **workspace** (`C050.C030Id`, nullable — las entradas se cargan/filtran por
+  workspace activo, como los dibujos), el **MetadataJSON** (contexto de gráfica/
+  workspace/momento) y el **AnalisisJSON** (subconjunto del scorecard, valores
+  técnicos reales, R/R de canal y la **tesis**: tesis de entrada, escenario
+  alcista/bajista, nivel de invalidación, zona objetivo). El modal de creación
+  muestra una **vista previa** del scorecard/Canal R/R y una sección opcional
+  *Tesis y escenarios*; el botón guarda como *"Guardar entrada con análisis"*. El
+  **detalle** (modal *Análisis*) muestra el snapshot original y lo **compara con
+  el estado actual** (puntajes y precio/rendimiento). Endpoints: `GET
+  /api/simulated-trades/{id}` (detalle con snapshot), `?c030Id=` en el listado,
+  y `PATCH` de la tesis que **no pisa** el resto del snapshot. Todo acotado por
+  `C005Id`: ningún usuario ve ni edita las entradas de otro.
 - **R/R de canal** (panel "R/R de canal"): selecciona DOS Free Lines como
   canal superior/inferior (con intercambio automático/manual) y una referencia
   (precio actual o entrada simulada); calcula beneficio/riesgo potencial y el

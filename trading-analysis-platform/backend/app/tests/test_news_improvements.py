@@ -183,11 +183,17 @@ DRAWING = {
 }
 
 
+def _ws(client, headers) -> int:
+    return client.get("/api/layouts/stock/AAPL", headers=headers).json()[0]["c030Id"]
+
+
 def test_locked_drawing_cannot_be_moved(client, db_session):
     make_user(db_session, "Ana", "ana@example.com")
     headers = login_headers(client, "Ana")
     created = client.post(
-        "/api/drawings", json={**DRAWING, "locked": True}, headers=headers
+        "/api/drawings",
+        json={**DRAWING, "locked": True, "c030Id": _ws(client, headers)},
+        headers=headers,
     ).json()
 
     moved = {**DRAWING, "locked": True, "points": [
@@ -209,6 +215,8 @@ def test_patch_drawing_of_another_user_404(client, db_session):
     make_user(db_session, "Beto", "beto@example.com")
     ha = login_headers(client, "Ana")
     hb = login_headers(client, "Beto")
-    created = client.post("/api/drawings", json=DRAWING, headers=ha).json()
+    created = client.post(
+        "/api/drawings", json={**DRAWING, "c030Id": _ws(client, ha)}, headers=ha
+    ).json()
     r = client.patch(f"/api/drawings/{created['id']}", json=DRAWING, headers=hb)
     assert r.status_code == 404

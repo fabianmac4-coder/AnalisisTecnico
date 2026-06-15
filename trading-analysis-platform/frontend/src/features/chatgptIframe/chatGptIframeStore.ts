@@ -6,6 +6,10 @@ import {
   useChartWorkspaceStore,
   selectActiveWorkspace,
 } from "@/features/charts/chartWorkspaceStore";
+import {
+  useStockScorecardStore,
+  selectScorecard,
+} from "@/features/stockScorecard/stockScorecardStore";
 import { buildChatGptPrompt, fetchChatGptContext } from "./chatGptPromptService";
 import type {
   ChatGptContext,
@@ -58,6 +62,14 @@ function rebuild(state: ChatGptIframeState): string {
         })),
       }
     : null;
+  // Stock Scorecard del símbolo activo (si ya se calculó y el toggle está on).
+  const scorecard =
+    state.includeScorecard && state.activeSymbol
+      ? selectScorecard(
+          useStockScorecardStore.getState(),
+          state.activeSymbol
+        ) ?? null
+      : null;
   return buildChatGptPrompt(
     state.activePromptType,
     state.context,
@@ -68,10 +80,13 @@ function rebuild(state: ChatGptIframeState): string {
       includeWatchlistNotes: state.includeWatchlistNotes,
       includeFavoriteStatus: state.includeFavoriteStatus,
       includeTimeframeSummary: state.includeTimeframeSummary,
+      includeScorecard: state.includeScorecard,
+      includeScorecardMetrics: state.includeScorecardMetrics,
     },
     channelRR,
     channelTimeframe,
-    workspace
+    workspace,
+    scorecard
   );
 }
 
@@ -91,6 +106,8 @@ export const useChatGptIframeStore = create<ChatGptIframeState>((set, get) => ({
   includeWatchlistNotes: true,
   includeFavoriteStatus: true,
   includeTimeframeSummary: true,
+  includeScorecard: true,
+  includeScorecardMetrics: false,
 
   async openPanel(symbol) {
     set({ isOpen: true, error: null, notice: null });

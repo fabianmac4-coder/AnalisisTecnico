@@ -8,7 +8,9 @@ const TOGGLES: Array<{
     | "includeDrawings"
     | "includeWatchlistNotes"
     | "includeFavoriteStatus"
-    | "includeTimeframeSummary";
+    | "includeTimeframeSummary"
+    | "includeScorecard"
+    | "includeScorecardMetrics";
   label: string;
 }> = [
   { key: "includePriceSummary", label: "Precio" },
@@ -17,6 +19,8 @@ const TOGGLES: Array<{
   { key: "includeWatchlistNotes", label: "Notas" },
   { key: "includeFavoriteStatus", label: "Favorito" },
   { key: "includeTimeframeSummary", label: "Temporalidades" },
+  { key: "includeScorecard", label: "Stock Scorecard" },
+  { key: "includeScorecardMetrics", label: "Métricas detalladas" },
 ];
 
 /**

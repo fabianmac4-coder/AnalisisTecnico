@@ -21,6 +21,9 @@ class AnalisisDibujo(Base):
     C0101Id = Column(Integer, primary_key=True, autoincrement=False)
     C005Id = Column(Integer, ForeignKey("dbo.C005.C005Id"), nullable=False)
     C010Id = Column(Integer, ForeignKey("dbo.C010.C010Id"), nullable=False)
+    # Workspace de analisis (dbo.C030). NULL = dibujo heredado (pre-workspaces),
+    # visible solo en el workspace por defecto de la accion.
+    C030Id = Column(Integer, ForeignKey("dbo.C030.C030Id"), nullable=True)
     TipoDibujo = Column(String(50), nullable=False)
     TemporalidadOrigen = Column(String(50), nullable=False)
     NombreAnalisis = Column(String(200), nullable=True)

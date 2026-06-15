@@ -36,6 +36,16 @@ class OperacionesSimuladasRepository:
             ).scalars()
         )
 
+    def list_by_user_action_workspace(
+        self, user_id: int, c010_id: int, c030_id: int
+    ) -> list[OperacionSimulada]:
+        """Entradas del workspace activo (incluye heredadas C030Id NULL)."""
+        return [
+            op
+            for op in self.list_by_user_and_action(user_id, c010_id)
+            if op.C030Id == c030_id or op.C030Id is None
+        ]
+
     def get_by_id_for_user(
         self, user_id: int, c050_id: int
     ) -> OperacionSimulada | None:
@@ -57,11 +67,15 @@ class OperacionesSimuladasRepository:
         nombre: str | None = None,
         notas: str | None = None,
         color: str | None = None,
+        c030_id: int | None = None,
+        metadata_json: str | None = None,
+        analisis_json: str | None = None,
     ) -> OperacionSimulada:
         now = utcnow()
         op = OperacionSimulada(
             C005Id=user_id,
             C010Id=c010_id,
+            C030Id=c030_id,
             TipoOperacion=tipo,
             PrecioEntrada=precio_entrada,
             Cantidad=cantidad,
@@ -73,6 +87,8 @@ class OperacionesSimuladasRepository:
             Color=color,
             Visible=True,
             Activo=True,
+            MetadataJSON=metadata_json,
+            AnalisisJSON=analisis_json,
             FechaCreacion=now,
             FechaActualizacion=now,
         )

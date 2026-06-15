@@ -12,11 +12,14 @@ const drawingRepo: DrawingRepository =
     : new ApiDrawingRepository();
 
 interface DrawingState {
+  /** Dibujos del WORKSPACE ACTIVO por símbolo (no se mezclan entre workspaces). */
   drawingsBySymbol: Record<string, Drawing[]>;
+  /** Workspace (C030Id) cuyos dibujos están cargados, por símbolo. */
+  loadedWorkspaceBySymbol: Record<string, number | undefined>;
   activeTool: DrawingTool;
   selectedDrawingId: string | null;
 
-  loadDrawings: (symbol: string) => Promise<void>;
+  loadDrawings: (symbol: string, c030Id?: number) => Promise<void>;
   addDrawing: (drawing: Drawing) => Promise<void>;
   updateDrawing: (drawing: Drawing) => Promise<void>;
   removeDrawing: (id: string) => Promise<void>;
@@ -29,13 +32,18 @@ interface DrawingState {
 
 export const useDrawingStore = create<DrawingState>((set, get) => ({
   drawingsBySymbol: {},
+  loadedWorkspaceBySymbol: {},
   activeTool: "cursor",
   selectedDrawingId: null,
 
-  async loadDrawings(symbol) {
+  async loadDrawings(symbol, c030Id) {
     symbol = symbol.toUpperCase();
-    const list = await drawingRepo.listBySymbol(symbol);
-    set({ drawingsBySymbol: { ...get().drawingsBySymbol, [symbol]: list } });
+    const list = await drawingRepo.listBySymbol(symbol, c030Id);
+    set({
+      drawingsBySymbol: { ...get().drawingsBySymbol, [symbol]: list },
+      loadedWorkspaceBySymbol: { ...get().loadedWorkspaceBySymbol, [symbol]: c030Id },
+      selectedDrawingId: null,
+    });
   },
 
   async addDrawing(drawing) {

@@ -34,6 +34,8 @@ interface Props {
   editable: boolean;
   symbol: string;
   sourceTimeframe: string;
+  /** Workspace activo: los dibujos nuevos se crean con este C030Id. */
+  c030Id?: number;
   showTimeframeLabels?: boolean;
   /** Colores por temporalidad para resolver el color efectivo de cada dibujo. */
   timeframeColors?: Record<string, string>;
@@ -98,6 +100,7 @@ export function DrawingLayer({
   editable,
   symbol,
   sourceTimeframe,
+  c030Id,
   showTimeframeLabels = false,
   timeframeColors = DEFAULT_TIMEFRAME_DRAWING_COLORS,
   futureInfo = null,
@@ -258,6 +261,7 @@ export function DrawingLayer({
     async (tool: TwoPointTool, points: DrawingPoint[]) => {
       const drawing = createDrawing({
         symbol,
+        c030Id,
         sourceTimeframe,
         type: tool,
         points,
@@ -266,7 +270,7 @@ export function DrawingLayer({
       });
       await addDrawing(drawing);
     },
-    [symbol, sourceTimeframe, addDrawing, timeframeColors]
+    [symbol, c030Id, sourceTimeframe, addDrawing, timeframeColors]
   );
 
   const localToDrawing = (e: React.PointerEvent): { local: LocalPoint; dp: DrawingPoint | null } => {

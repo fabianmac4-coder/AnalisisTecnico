@@ -29,6 +29,29 @@ PRICE_BASIS = "raw"
 # Caches globales separadas (un proceso, uso personal).
 _cache = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
 _quote_cache = TTLCache(ttl_seconds=settings.quote_cache_ttl_seconds)
+# Fundamentales cambian lento: TTL largo (1h).
+_fundamentals_cache = TTLCache(ttl_seconds=3600)
+
+# Campos de `ticker.info` que usa el Stock Scorecard (Yahoo, best-effort).
+_FUNDAMENTAL_FIELDS = (
+    "marketCap",
+    "trailingPE",
+    "forwardPE",
+    "priceToSalesTrailing12Months",
+    "priceToBook",
+    "profitMargins",
+    "operatingMargins",
+    "returnOnEquity",
+    "returnOnAssets",
+    "revenueGrowth",
+    "earningsGrowth",
+    "debtToEquity",
+    "currentRatio",
+    "dividendYield",
+    "payoutRatio",
+    "freeCashflow",
+    "operatingCashflow",
+)
 
 
 class SymbolNotFoundError(Exception):
@@ -564,6 +587,45 @@ def _resolve_meta(symbol: str) -> tuple[str | None, str | None]:
         return currency, tz
     except Exception:  # noqa: BLE001 - meta es opcional
         return None, None
+
+
+def get_fundamentals(symbol: str, force_refresh: bool = False) -> dict:
+    """Datos fundamentales basicos de Yahoo (`ticker.info`), best-effort.
+
+    Devuelve un dict con los campos de `_FUNDAMENTAL_FIELDS` presentes (mas
+    longName/sector/industry), o {} si Yahoo no responde. NO requiere ningun
+    proveedor de pago: solo lo que ya expone yfinance. Cache propia con TTL 1h.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return {}
+
+    cache_key = f"fund:{symbol}"
+    if not force_refresh:
+        cached = _fundamentals_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    info: dict = {}
+    try:
+        import yfinance as yf
+
+        info = yf.Ticker(symbol).info or {}
+    except Exception:  # noqa: BLE001 - fundamentales jamas rompen nada
+        return {}
+
+    out: dict = {}
+    for field in _FUNDAMENTAL_FIELDS:
+        val = _safe_float(info.get(field))
+        if val is not None:
+            out[field] = val
+    for meta_field in ("longName", "shortName", "sector", "industry"):
+        val = info.get(meta_field)
+        if isinstance(val, str) and val:
+            out[meta_field] = val
+
+    _fundamentals_cache.set(cache_key, out)
+    return out
 
 
 def search_symbols(query: str) -> list[SymbolInfo]:

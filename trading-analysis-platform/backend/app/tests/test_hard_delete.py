@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 from app.models import (
     AnalisisDibujo,
     CatalogoUsuarioAccion,
+    ConfiguracionScorecard,
     IndicadorConfiguracion,
     LayoutGrafica,
     PasswordToken,
@@ -40,10 +41,15 @@ def _seed_user_with_data(client, db_session, username="Victima", email="victima@
     """Crea un usuario con filas en TODAS las tablas hijas + un token."""
     user = make_user(db_session, username, email)
     headers = login_headers(client, username)
-    assert client.post("/api/drawings", json=DRAWING_PAYLOAD, headers=headers).status_code in (200, 201)
+    ws = client.get("/api/layouts/stock/AAPL", headers=headers).json()[0]["c030Id"]
+    assert client.post(
+        "/api/drawings", json={**DRAWING_PAYLOAD, "c030Id": ws}, headers=headers
+    ).status_code in (200, 201)
     assert client.put("/api/indicators", json=INDICATOR_PAYLOAD, headers=headers).status_code == 200
     assert client.put("/api/layouts/default", json={"theme": "dark"}, headers=headers).status_code == 200
     assert client.post("/api/catalog", json={"symbol": "AAPL"}, headers=headers).status_code == 201
+    # Config de scorecard (C081): la crea el endpoint default.
+    assert client.get("/api/scorecard/configs/default", headers=headers).status_code == 200
     PasswordTokensRepository(db_session).create_token(user.C005Id, "hash-x" + username, "RESET_PASSWORD", 1)
     db_session.commit()
     return user
@@ -59,7 +65,7 @@ def test_admin_hard_deletes_user_and_all_child_records(client, db_session):
     target_id = target.C005Id
 
     # Precondicion: hay filas hijas en las 5 tablas.
-    for model in (PasswordToken, AnalisisDibujo, IndicadorConfiguracion, LayoutGrafica, CatalogoUsuarioAccion):
+    for model in (PasswordToken, AnalisisDibujo, IndicadorConfiguracion, LayoutGrafica, CatalogoUsuarioAccion, ConfiguracionScorecard):
         assert _count(db_session, model, target_id) >= 1, model.__name__
 
     headers = login_headers(client, "Root")
@@ -68,7 +74,7 @@ def test_admin_hard_deletes_user_and_all_child_records(client, db_session):
     assert res.json() == {"success": True, "message": "User permanently deleted"}
 
     # Todas las tablas hijas y el usuario quedaron sin rastro.
-    for model in (PasswordToken, AnalisisDibujo, IndicadorConfiguracion, LayoutGrafica, CatalogoUsuarioAccion):
+    for model in (PasswordToken, AnalisisDibujo, IndicadorConfiguracion, LayoutGrafica, CatalogoUsuarioAccion, ConfiguracionScorecard):
         assert _count(db_session, model, target_id) == 0, model.__name__
     assert db_session.get(Usuario, target_id) is None
 

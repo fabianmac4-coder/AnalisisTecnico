@@ -19,6 +19,8 @@ function uuid(): string {
 
 export interface CreateDrawingParams {
   symbol: string;
+  /** Workspace de análisis dueño del dibujo (aislamiento por C030Id). */
+  c030Id?: number;
   sourceTimeframe: string;
   type: DrawingType;
   points: DrawingPoint[];
@@ -56,6 +58,7 @@ export function createDrawing(params: CreateDrawingParams): Drawing {
   return {
     id: uuid(),
     symbol: params.symbol.toUpperCase(),
+    c030Id: params.c030Id,
     sourceTimeframe: params.sourceTimeframe,
     type: params.type,
     points: params.points,

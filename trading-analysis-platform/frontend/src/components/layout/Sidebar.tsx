@@ -1,8 +1,11 @@
 import { SymbolCatalog } from "@/features/symbols/SymbolCatalog";
 import { SimulatedTradesPanel } from "@/features/simulatedTrades/SimulatedTradesPanel";
 import { SimulatedTradeModal } from "@/features/simulatedTrades/SimulatedTradeModal";
+import { SimulatedTradeDetailModal } from "@/features/simulatedTrades/SimulatedTradeDetailModal";
 import { ChannelRiskRewardPanel } from "@/features/channelRiskReward/ChannelRiskRewardPanel";
 import { SymbolNewsPanel } from "@/features/news/SymbolNewsPanel";
+import { StockScorecard } from "@/features/stockScorecard/StockScorecard";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 /**
  * Sidebar izquierda: watchlist + (para el simbolo activo) entradas simuladas
@@ -16,11 +19,16 @@ export function Sidebar() {
       </div>
       <div className="flex-1 overflow-auto">
         <SymbolCatalog />
+        {/* Resumen ejecutivo del símbolo activo; si falla, no tira la sidebar. */}
+        <ErrorBoundary variant="panel">
+          <StockScorecard />
+        </ErrorBoundary>
         <SymbolNewsPanel />
         <SimulatedTradesPanel />
         <ChannelRiskRewardPanel />
       </div>
       <SimulatedTradeModal />
+      <SimulatedTradeDetailModal />
     </aside>
   );
 }

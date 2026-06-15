@@ -1,14 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /** Entrada del chat: Enter envía, Shift+Enter hace salto de línea. */
 export function AiChatInput({
   disabled,
   onSend,
+  prefillMessage,
+  onConsumePrefill,
 }: {
   disabled: boolean;
   onSend: (message: string) => void;
+  /** Texto a precargar (p.ej. desde el Stock Scorecard); el usuario revisa y envía. */
+  prefillMessage?: string | null;
+  onConsumePrefill?: () => void;
 }) {
   const [text, setText] = useState("");
+
+  useEffect(() => {
+    if (prefillMessage) {
+      setText(prefillMessage);
+      onConsumePrefill?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillMessage]);
 
   const send = () => {
     const message = text.trim();

@@ -15,6 +15,8 @@ import {
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
+  type SeriesMarker,
+  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import type {
@@ -341,6 +343,33 @@ export class LightweightChartsAdapter implements ChartEngineAdapter {
             title: l.title || "Sim Entry",
           })
         );
+      },
+      setSimulatedEntryMarkers: (markers) => {
+        // Ancla cada flecha al bar REAL mas cercano a la fecha de entrada (los
+        // marcadores de LWC exigen un tiempo presente en la serie; ademas asi
+        // cada temporalidad lo ubica sobre su propia rejilla de velas).
+        const candleTimes = handle.candles.map((c) => c.time);
+        const nearestCandleMs = (timeMs: number): number => {
+          if (candleTimes.length === 0) return timeMs;
+          let best = candleTimes[0];
+          for (const t of candleTimes) {
+            if (Math.abs(t - timeMs) < Math.abs(best - timeMs)) best = t;
+          }
+          return best;
+        };
+        const seriesMarkers: SeriesMarker<Time>[] = markers.map((m) => {
+          const isLong = m.type === "LONG";
+          return {
+            time: msToChartTime(nearestCandleMs(m.timeMs)) as UTCTimestamp,
+            position: isLong ? "belowBar" : "aboveBar",
+            color: m.color || (isLong ? "#22c55e" : "#ef4444"),
+            shape: isLong ? "arrowUp" : "arrowDown",
+            text: m.title ?? (isLong ? "LONG" : "SHORT"),
+          };
+        });
+        // LWC exige marcadores ordenados ascendentemente por tiempo.
+        seriesMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+        handle.mainSeries.setMarkers(seriesMarkers);
       },
     };
   }

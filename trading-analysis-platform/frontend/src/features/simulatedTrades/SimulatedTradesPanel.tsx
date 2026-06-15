@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSymbolStore } from "@/stores/symbolStore";
+import {
+  useChartWorkspaceStore,
+  selectActiveWorkspace,
+} from "@/features/charts/chartWorkspaceStore";
+import { showToast } from "@/components/ui/toastStore";
 import { useSimulatedTradesStore } from "./simulatedTradesStore";
 import type { SimulatedTrade } from "./simulatedTradesTypes";
 
@@ -19,14 +24,23 @@ export function SimulatedTradesPanel() {
   );
   const load = useSimulatedTradesStore((s) => s.load);
   const openModal = useSimulatedTradesStore((s) => s.openModal);
+  const openDetail = useSimulatedTradesStore((s) => s.openDetail);
   const closeTrade = useSimulatedTradesStore((s) => s.close);
   const removeTrade = useSimulatedTradesStore((s) => s.remove);
   const updateTrade = useSimulatedTradesStore((s) => s.update);
   const [showClosed, setShowClosed] = useState(false);
 
+  // Workspace activo: las entradas se cargan/filtran por workspace (C030Id),
+  // igual que los dibujos — no se mezclan entre espacios de trabajo.
+  const activeWorkspaceId = useChartWorkspaceStore((s) =>
+    selectActiveWorkspace(s, symbol)?.c030Id
+  );
+
   useEffect(() => {
-    if (symbol && import.meta.env.MODE !== "test") void load(symbol);
-  }, [symbol, load]);
+    if (symbol && import.meta.env.MODE !== "test") {
+      void load(symbol, activeWorkspaceId);
+    }
+  }, [symbol, activeWorkspaceId, load]);
 
   if (!symbol) return null;
 
@@ -48,6 +62,16 @@ export function SimulatedTradesPanel() {
     if (window.confirm("¿Eliminar esta entrada simulada? (borrado suave)")) {
       void removeTrade(symbol, trade.id);
     }
+  };
+
+  // "Localizar en gráfica": asegura que el marcador exacto (flecha tiempo+precio)
+  // esté visible en las seis gráficas.
+  const onLocate = (trade: SimulatedTrade) => {
+    if (!trade.visible) void updateTrade(symbol, trade.id, { visible: true });
+    showToast(
+      `Entrada ${trade.type} @ ${trade.entryPrice.toFixed(2)} marcada en las gráficas`,
+      "info"
+    );
   };
 
   return (
@@ -109,7 +133,23 @@ export function SimulatedTradesPanel() {
                 </div>
                 {t.name && <div className="mt-0.5 truncate text-gray-300">{t.name}</div>}
                 {t.notes && <div className="truncate text-muted">{t.notes}</div>}
-                <div className="mt-1 flex gap-1">
+                <div className="mt-1 flex flex-wrap gap-1">
+                  <button
+                    onClick={() => onLocate(t)}
+                    data-testid={`sim-trade-locate-${t.id}`}
+                    title="Marcar el punto exacto de entrada en las gráficas"
+                    className="rounded bg-panel-3 px-1.5 py-0.5 hover:bg-edge"
+                  >
+                    📍 Localizar
+                  </button>
+                  <button
+                    onClick={() => void openDetail(t.id)}
+                    data-testid={`sim-trade-analysis-${t.id}`}
+                    title="Ver el análisis guardado al crear la entrada"
+                    className="rounded bg-panel-3 px-1.5 py-0.5 hover:bg-edge"
+                  >
+                    🔍 Análisis
+                  </button>
                   {t.status === "ABIERTA" && (
                     <>
                       <button

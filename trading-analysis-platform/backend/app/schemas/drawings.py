@@ -22,7 +22,9 @@ DrawingType = Literal[
     "parallel_channel",
     "text",
 ]
-SourceTimeframe = Literal["4Y_1W", "1Y_1D", "6M_1D", "3M_1D", "1M_1H", "1W_30M"]
+# Antes era un Literal de los seis presets; ahora es libre porque los slots de
+# workspace usan contextKeys dinamicos (ej. "1Y_1h", "6M_15m").
+SourceTimeframe = str
 LineStyle = Literal["solid", "dashed", "dotted"]
 
 
@@ -48,6 +50,8 @@ class DrawingIn(BaseModel):
 
     id: str | None = None  # numerico => update; uuid/None => create
     symbol: str = Field(min_length=1)
+    # Workspace de analisis (C030). Requerido al CREAR; el handler lo valida.
+    c030Id: int | None = None
     sourceTimeframe: SourceTimeframe
     type: DrawingType
     points: list[DrawingPoint] = Field(default_factory=list)
@@ -62,6 +66,7 @@ class DrawingIn(BaseModel):
 class DrawingOut(BaseModel):
     id: str  # str(C0101Id)
     symbol: str
+    c030Id: int | None = None
     sourceTimeframe: str
     type: str
     points: list[DrawingPoint]

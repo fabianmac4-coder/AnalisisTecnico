@@ -33,6 +33,8 @@ export function AiChatPanel() {
   const includeIndicators = useAiChatStore((s) => s.includeIndicators);
   const includeNews = useAiChatStore((s) => s.includeNews);
   const setToggle = useAiChatStore((s) => s.setToggle);
+  const prefillMessage = useAiChatStore((s) => s.prefillMessage);
+  const consumePrefill = useAiChatStore((s) => s.consumePrefill);
 
   const activeSymbol = useChartStore((s) => s.activeSymbol);
   const [showConversations, setShowConversations] = useState(false);
@@ -160,6 +162,8 @@ export function AiChatPanel() {
           <AiChatInput
             disabled={sending}
             onSend={(message) => void sendMessage(activeConversationId, message)}
+            prefillMessage={prefillMessage}
+            onConsumePrefill={consumePrefill}
           />
           <p className="px-3 pb-2 text-center text-[9px] text-muted">
             Análisis informativo generado por IA; no es asesoría financiera.

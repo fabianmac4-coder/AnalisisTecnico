@@ -27,6 +27,38 @@ class DibujosRepository:
             ).scalars()
         )
 
+    def list_by_user_action_workspace(
+        self,
+        user_id: int,
+        c010_id: int,
+        c030_id: int,
+        include_legacy_null: bool = False,
+    ) -> list[AnalisisDibujo]:
+        """Dibujos del workspace activo (C030Id == c030_id).
+
+        Si `include_legacy_null` (solo para el workspace por defecto), tambien
+        incluye los dibujos heredados sin workspace (C030Id IS NULL) para no
+        perderlos — sin contaminar el resto de workspaces.
+        """
+        if include_legacy_null:
+            workspace_clause = (AnalisisDibujo.C030Id == c030_id) | (
+                AnalisisDibujo.C030Id.is_(None)
+            )
+        else:
+            workspace_clause = AnalisisDibujo.C030Id == c030_id
+        return list(
+            self.db.execute(
+                select(AnalisisDibujo)
+                .where(
+                    AnalisisDibujo.C005Id == user_id,
+                    AnalisisDibujo.C010Id == c010_id,
+                    AnalisisDibujo.Eliminado == False,  # noqa: E712
+                    workspace_clause,
+                )
+                .order_by(AnalisisDibujo.C0101Id)
+            ).scalars()
+        )
+
     def get_owned(self, user_id: int, dibujo_id: int) -> AnalisisDibujo | None:
         """Solo devuelve el dibujo si pertenece al usuario (aislamiento)."""
         dibujo = self.db.get(AnalisisDibujo, dibujo_id)
@@ -42,6 +74,7 @@ class DibujosRepository:
         temporalidad_origen: str,
         puntos: list[dict],
         estilo: dict,
+        c030_id: int | None = None,
         visible: bool = True,
         bloqueado: bool = False,
         mostrar_todas: bool = True,
@@ -53,6 +86,7 @@ class DibujosRepository:
             C0101Id=next_id(self.db, AnalisisDibujo.C0101Id),
             C005Id=user_id,
             C010Id=c010_id,
+            C030Id=c030_id,
             TipoDibujo=tipo,
             TemporalidadOrigen=temporalidad_origen,
             PuntosJSON=json.dumps(puntos),

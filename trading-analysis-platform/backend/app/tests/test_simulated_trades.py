@@ -204,3 +204,90 @@ def test_calculate_performance_handles_missing_price(db_session):
     assert perf["gainLossPercent"] is None
     assert perf["currentPrice"] is None
     assert perf["daysSinceEntry"] >= 0
+
+
+# ===== Workspace + snapshot de análisis (C030Id / MetadataJSON / AnalisisJSON) =====
+def _ws(client, headers, symbol="AAPL") -> int:
+    return client.get(f"/api/layouts/stock/{symbol}", headers=headers).json()[0]["c030Id"]
+
+
+def test_entry_saves_workspace_and_snapshot(client, db_session):
+    make_user(db_session, "Ana", "ana@example.com")
+    headers = login_headers(client, "Ana")
+    c030 = _ws(client, headers)
+    payload = {
+        **ENTRY,
+        "c030Id": c030,
+        "entryThesis": "Retest de breakout",
+        "bullishScenario": "Aguanta SMA50",
+        "invalidationLevel": 176.0,
+        "metadata": {"chartContextKey": "1Y_1h", "nearestCandleClose": 185.8},
+        "analysisSnapshot": {"scorecard": {"overallScore": 72}},
+    }
+    trade = _create(client, headers, payload)
+    assert trade["c030Id"] == c030
+
+    # El detalle devuelve metadata y analysisSnapshot parseados.
+    detail = client.get(f"/api/simulated-trades/{trade['id']}", headers=headers).json()
+    assert detail["metadata"]["chartContextKey"] == "1Y_1h"
+    assert detail["analysisSnapshot"]["scorecard"]["overallScore"] == 72
+    assert detail["analysisSnapshot"]["simulatedEntryThesis"]["scenario"] == "Retest de breakout"
+    assert detail["analysisSnapshot"]["simulatedEntryThesis"]["invalidation"] == 176.0
+
+
+def test_entry_create_accurate_price_and_date(client, db_session):
+    make_user(db_session, "Ana", "ana@example.com")
+    headers = login_headers(client, "Ana")
+    trade = _create(client, headers, {**ENTRY, "c030Id": _ws(client, headers)})
+    assert trade["entryPrice"] == 185.25
+    assert trade["entryDate"].startswith("2026-05-01T14:30:00")
+
+
+def test_list_filters_by_workspace(client, db_session):
+    make_user(db_session, "Ana", "ana@example.com")
+    headers = login_headers(client, "Ana")
+    w1 = _ws(client, headers)
+    w2 = client.post(
+        "/api/layouts/stock/AAPL", json={"name": "Short"}, headers=headers
+    ).json()["c030Id"]
+    _create(client, headers, {**ENTRY, "c030Id": w1})
+
+    in_w1 = client.get(
+        "/api/simulated-trades", params={"symbol": "AAPL", "c030Id": w1}, headers=headers
+    ).json()
+    in_w2 = client.get(
+        "/api/simulated-trades", params={"symbol": "AAPL", "c030Id": w2}, headers=headers
+    ).json()
+    assert len(in_w1) == 1
+    # w2 no tiene entradas propias (la de w1 no se cuela; las heredadas NULL sí, pero no hay).
+    assert all(t["c030Id"] == w2 or t["c030Id"] is None for t in in_w2)
+    assert not any(t["c030Id"] == w1 for t in in_w2)
+
+
+def test_edit_thesis_preserves_snapshot(client, db_session):
+    make_user(db_session, "Ana", "ana@example.com")
+    headers = login_headers(client, "Ana")
+    trade = _create(
+        client, headers,
+        {**ENTRY, "c030Id": _ws(client, headers),
+         "analysisSnapshot": {"scorecard": {"overallScore": 72}}},
+    )
+    client.patch(
+        f"/api/simulated-trades/{trade['id']}",
+        json={"thesis": {"scenario": "Actualizado", "targetArea": "210"}},
+        headers=headers,
+    )
+    detail = client.get(f"/api/simulated-trades/{trade['id']}", headers=headers).json()
+    # La tesis se actualiza; el snapshot original (scorecard) se conserva.
+    assert detail["analysisSnapshot"]["simulatedEntryThesis"]["scenario"] == "Actualizado"
+    assert detail["analysisSnapshot"]["scorecard"]["overallScore"] == 72
+
+
+def test_detail_of_another_user_is_404(client, db_session):
+    make_user(db_session, "Ana", "ana@example.com")
+    make_user(db_session, "Beto", "beto@example.com")
+    ha = login_headers(client, "Ana")
+    hb = login_headers(client, "Beto")
+    trade = _create(client, ha, {**ENTRY, "c030Id": _ws(client, ha)})
+    res = client.get(f"/api/simulated-trades/{trade['id']}", headers=hb)
+    assert res.status_code == 404

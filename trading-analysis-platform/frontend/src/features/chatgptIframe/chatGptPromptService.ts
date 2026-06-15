@@ -4,6 +4,13 @@
 
 import { apiClient } from "@/services/apiClient";
 import type { ChannelRiskRewardResult } from "@/features/channelRiskReward/channelRiskRewardTypes";
+import {
+  CONFIDENCE_LABEL,
+  OVERALL_VIEW_LABEL,
+  RISK_LABEL,
+  scorecardKeyMetricsLines,
+  type StockScorecardResponse,
+} from "@/features/stockScorecard/stockScorecardTypes";
 import type {
   ChatGptContext,
   ChatGptContextToggles,
@@ -100,7 +107,9 @@ export function buildChatGptPrompt(
   workspace?: {
     name: string;
     chartContext: { slotId: string; range: string; interval: string }[];
-  } | null
+  } | null,
+  /** Stock Scorecard del símbolo (si el toggle está activo y ya se calculó). */
+  scorecard?: StockScorecardResponse | null
 ): string {
   const lines: string[] = [];
   const symbol = context.symbol;
@@ -319,6 +328,41 @@ export function buildChatGptPrompt(
         .map((s, i) => `Chart ${i + 1} = ${s.range}/${s.interval}`)
         .join(", ")}`
     );
+  }
+
+  if (toggles.includeScorecard && scorecard) {
+    const n = (v: number | null) => (v === null ? "n/d" : String(v));
+    lines.push("");
+    lines.push("Stock Scorecard (heurístico, datos disponibles):");
+    lines.push(`- Vista general: ${OVERALL_VIEW_LABEL[scorecard.overallView]}`);
+    lines.push(
+      `- Puntajes — General: ${n(scorecard.overallScore)}, Técnico: ${n(
+        scorecard.technicalScore
+      )}, Fundamental: ${n(scorecard.fundamentalScore)}, Noticias: ${n(
+        scorecard.newsScore
+      )}, Sentimiento: ${n(scorecard.sentimentScore)}`
+    );
+    lines.push(
+      `- Riesgo: ${RISK_LABEL[scorecard.riskLevel]} · Confianza: ${
+        CONFIDENCE_LABEL[scorecard.confidenceLevel]
+      }`
+    );
+    if (scorecard.strengths.length) {
+      lines.push(`- Fortalezas: ${scorecard.strengths.join("; ")}`);
+    }
+    if (scorecard.risks.length) {
+      lines.push(`- Riesgos: ${scorecard.risks.join("; ")}`);
+    }
+    if (scorecard.watchItems.length) {
+      lines.push(`- A vigilar: ${scorecard.watchItems.join("; ")}`);
+    }
+    if (toggles.includeScorecardMetrics) {
+      const metricLines = scorecardKeyMetricsLines(scorecard);
+      if (metricLines.length) {
+        lines.push("Métricas detalladas:");
+        lines.push(...metricLines);
+      }
+    }
   }
 
   if (toggles.includeTimeframeSummary && context.timeframes?.length) {

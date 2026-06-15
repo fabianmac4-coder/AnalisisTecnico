@@ -4,9 +4,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SimulatedTradesPanel } from "./SimulatedTradesPanel";
 import { SimulatedTradeModal } from "./SimulatedTradeModal";
+import { SimulatedTradeDetailModal } from "./SimulatedTradeDetailModal";
 import { useSimulatedTradesStore } from "./simulatedTradesStore";
 import { useSymbolStore } from "@/stores/symbolStore";
-import type { SimulatedTrade } from "./simulatedTradesTypes";
+import type { SimulatedTrade, SimulatedTradeDetail } from "./simulatedTradesTypes";
 
 const TRADE: SimulatedTrade = {
   id: 1,
@@ -120,5 +121,91 @@ describe("SimulatedTradesPanel", () => {
     });
     const open = useSimulatedTradesStore.getState().getOpenVisible("AAPL");
     expect(open.map((t) => t.id)).toEqual([1]);
+  });
+});
+
+describe("entradas simuladas con workspace + snapshot (PART 4)", () => {
+  it("load(symbol, c030Id) filtra por workspace y registra el workspace cargado", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse([TRADE]) as never);
+    await useSimulatedTradesStore.getState().load("AAPL", 77);
+
+    const url = String(fetchSpy.mock.calls[0][0]);
+    expect(url).toContain("symbol=AAPL");
+    expect(url).toContain("c030Id=77");
+    expect(useSimulatedTradesStore.getState().loadedWorkspaceBySymbol.AAPL).toBe(77);
+  });
+
+  it("guardar con tesis incluye la tesis y el snapshot de análisis en el POST", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ ...TRADE, id: 9 }, 201) as never);
+    useSimulatedTradesStore.setState({ modalOpen: true });
+    render(<SimulatedTradeModal />);
+
+    fireEvent.change(screen.getByTestId("sim-entry-price"), { target: { value: "200" } });
+    fireEvent.click(screen.getByTestId("sim-entry-thesis-toggle"));
+    fireEvent.change(screen.getByPlaceholderText("p. ej. Retest de breakout"), {
+      target: { value: "Rebote en soporte" },
+    });
+    fireEvent.click(screen.getByTestId("sim-entry-save"));
+
+    await waitFor(() => {
+      const post = fetchSpy.mock.calls.find(
+        (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+      );
+      expect(post).toBeTruthy();
+      const body = JSON.parse((post![1] as RequestInit).body as string);
+      expect(body.entryThesis).toBe("Rebote en soporte");
+      // El snapshot de análisis siempre se adjunta (aunque esté mínimo).
+      expect(body.analysisSnapshot.createdFrom).toBe("SIM_ENTRY_TOOL");
+      expect(body.analysisSnapshot.symbol).toBe("AAPL");
+      expect(body.metadata).toBeTruthy();
+    });
+  });
+
+  it("el botón Análisis abre el detalle con el snapshot guardado", async () => {
+    const detail: SimulatedTradeDetail = {
+      ...TRADE,
+      metadata: { workspaceName: "Principal", capturedAt: "2026-05-01T14:30:00Z" },
+      analysisSnapshot: {
+        createdFrom: "SIM_ENTRY_TOOL",
+        symbol: "AAPL",
+        scorecard: { overallScore: 72, technicalScore: 80, overallView: "BULLISH" },
+        channelRiskReward: { ratio: 2.5 },
+        simulatedEntryThesis: { scenario: "Rebote en soporte" },
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(detail) as never);
+
+    render(
+      <>
+        <SimulatedTradesPanel />
+        <SimulatedTradeDetailModal />
+      </>
+    );
+    fireEvent.click(screen.getByTestId("sim-trade-analysis-1"));
+
+    await waitFor(() => expect(screen.getByTestId("sim-detail-modal")).toBeTruthy());
+    expect(screen.getByTestId("sim-detail-thesis")).toBeTruthy();
+    expect(screen.getByText("Rebote en soporte")).toBeTruthy();
+    expect(screen.getByTestId("sim-detail-scorecard")).toBeTruthy();
+    expect(screen.getByTestId("sim-detail-channel")).toBeTruthy();
+  });
+
+  it("Localizar hace visible la entrada para que aparezca el marcador exacto", async () => {
+    const updated = { ...TRADE, visible: true };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(updated) as never);
+    useSimulatedTradesStore.setState({
+      tradesBySymbol: { AAPL: [{ ...TRADE, visible: false }] },
+    });
+    render(<SimulatedTradesPanel />);
+    fireEvent.click(screen.getByTestId("sim-trade-locate-1"));
+    await waitFor(() =>
+      expect(
+        useSimulatedTradesStore.getState().tradesBySymbol.AAPL[0].visible
+      ).toBe(true)
+    );
   });
 });

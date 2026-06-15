@@ -199,6 +199,7 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
             drawings={drawings}
             symbol={symbol}
             sourceTimeframe={sourceTimeframe}
+            c030Id={c030Id}
             editable
             overlays={overlays}
             timeframeColors={timeframeColors}

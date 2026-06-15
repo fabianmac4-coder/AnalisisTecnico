@@ -28,6 +28,8 @@ interface Props {
   drawings: Drawing[];
   symbol: string;
   sourceTimeframe: string;
+  /** Workspace activo: los dibujos nuevos se crean en este C030Id. */
+  c030Id?: number;
   editable: boolean;
   showTimeframeLabels?: boolean;
   overlays?: OverlayLine[];
@@ -52,6 +54,7 @@ export function ChartCanvas({
   drawings,
   symbol,
   sourceTimeframe,
+  c030Id,
   editable,
   showTimeframeLabels = false,
   overlays = [],
@@ -139,15 +142,27 @@ export function ChartCanvas({
   // precio de entrada, persistidas en SQL (C050) y visibles en los 6 charts.
   const simTrades = useSimulatedTradesStore((s) => s.tradesBySymbol[symbol]);
   useEffect(() => {
-    if (!instance?.setSimulatedEntryLines) return;
-    const lines = (simTrades ?? [])
-      .filter((t) => t.status === "ABIERTA" && t.visible)
-      .map((t) => ({
+    const open = (simTrades ?? []).filter(
+      (t) => t.status === "ABIERTA" && t.visible
+    );
+    // Linea de precio (secundaria): nivel horizontal de entrada.
+    instance?.setSimulatedEntryLines?.(
+      open.map((t) => ({
         price: t.entryPrice,
         color: t.color,
         title: t.name || `Sim ${t.type}`,
-      }));
-    instance.setSimulatedEntryLines(lines);
+      }))
+    );
+    // Marcador EXACTO (primario): flecha anclada al tiempo+precio de entrada.
+    instance?.setSimulatedEntryMarkers?.(
+      open.map((t) => ({
+        id: t.id,
+        timeMs: Date.parse(t.entryDate),
+        type: t.type,
+        color: t.color,
+        title: `${t.type} ${t.entryPrice.toFixed(2)}`,
+      }))
+    );
   }, [instance, simTrades, chartType]);
 
   // Overlays de indicadores (SMA/EMA/Bollinger...).
@@ -197,6 +212,7 @@ export function ChartCanvas({
         editable={editable}
         symbol={symbol}
         sourceTimeframe={sourceTimeframe}
+        c030Id={c030Id}
         showTimeframeLabels={showTimeframeLabels}
         timeframeColors={timeframeColors}
         futureInfo={futureInfo}

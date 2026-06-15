@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useChartStore } from "@/stores/chartStore";
+import { useDrawingStore } from "@/stores/drawingStore";
 import {
   useChartWorkspaceStore,
   selectActiveWorkspace,
@@ -23,6 +24,7 @@ export function ChartGrid() {
   const activeWorkspace = useChartWorkspaceStore((s) =>
     selectActiveWorkspace(s, activeSymbol)
   );
+  const loadDrawings = useDrawingStore((s) => s.loadDrawings);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // Garantiza que los workspaces del simbolo esten cargados (por si se llega
@@ -38,6 +40,9 @@ export function ChartGrid() {
   useEffect(() => {
     if (activeSymbol && activeWorkspace) {
       void loadWorkspaceSlots(activeSymbol, activeWorkspace.chartSlots);
+      // Dibujos AISLADOS por workspace: al cambiar de pestaña se recargan los
+      // del workspace activo (no se mezclan con los de otros workspaces).
+      void loadDrawings(activeSymbol, activeWorkspace.c030Id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSymbol, c030Id]);

@@ -49,6 +49,8 @@ interface AiChatState {
   loading: boolean;
   sending: boolean;
   error: string | null;
+  /** Texto a precargar en el input (p.ej. desde el Stock Scorecard). */
+  prefillMessage: string | null;
 
   // Toggles de contexto (por defecto todo activado).
   includeChartContext: boolean;
@@ -57,6 +59,9 @@ interface AiChatState {
   includeNews: boolean;
 
   openChat: (symbol: string) => Promise<void>;
+  /** Abre el chat del símbolo y precarga un mensaje en el input. */
+  openWithPrefill: (symbol: string, message: string) => Promise<void>;
+  consumePrefill: () => void;
   closeChat: () => void;
   setSymbol: (symbol: string) => Promise<void>;
   loadConversations: (symbol: string) => Promise<void>;
@@ -81,6 +86,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   loading: false,
   sending: false,
   error: null,
+  prefillMessage: null,
 
   includeChartContext: true,
   includeDrawings: true,
@@ -90,6 +96,15 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   async openChat(symbol) {
     set({ isOpen: true, error: null });
     await get().setSymbol(symbol);
+  },
+
+  async openWithPrefill(symbol, message) {
+    set({ isOpen: true, error: null, prefillMessage: message });
+    await get().setSymbol(symbol);
+  },
+
+  consumePrefill() {
+    set({ prefillMessage: null });
   },
 
   closeChat() {

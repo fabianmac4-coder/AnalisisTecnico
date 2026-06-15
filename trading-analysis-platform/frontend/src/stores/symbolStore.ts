@@ -5,7 +5,6 @@ import type { SymbolCatalogRepository } from "@/repositories/SymbolCatalogReposi
 import { ApiSymbolCatalogRepository } from "@/repositories/ApiSymbolCatalogRepository";
 import { LocalStorageSymbolCatalogRepository } from "@/repositories/LocalStorageSymbolCatalogRepository";
 import { useChartStore } from "./chartStore";
-import { useDrawingStore } from "./drawingStore";
 import { useChartWorkspaceStore } from "@/features/charts/chartWorkspaceStore";
 
 // Watchlist en SQL via API; localStorage solo en tests (sin red).
@@ -83,13 +82,11 @@ export const useSymbolStore = create<SymbolState>((set, get) => ({
     }
 
     // Marca el simbolo activo en el chartStore (el grid lo necesita para
-    // renderizar) y dispara la carga de workspaces y dibujos. El ChartGrid
-    // carga los seis slots del workspace activo de forma reactiva.
+    // renderizar) y carga los workspaces. El ChartGrid carga, de forma
+    // reactiva, los seis slots Y los dibujos del workspace ACTIVO (los dibujos
+    // estan aislados por workspace: ver ChartGrid).
     useChartStore.setState({ activeSymbol: symbol });
-    await Promise.all([
-      useChartWorkspaceStore.getState().loadWorkspaces(symbol),
-      useDrawingStore.getState().loadDrawings(symbol),
-    ]);
+    await useChartWorkspaceStore.getState().loadWorkspaces(symbol);
   },
 
   async pinSymbol(symbol) {

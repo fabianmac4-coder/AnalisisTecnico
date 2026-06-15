@@ -29,6 +29,8 @@ from app.routers import (  # noqa: E402
     market_movers,
     noticias,
     operaciones_simuladas,
+    scorecard_config,
+    stock_scorecard,
     symbols,
 )
 from app.schemas.market import HealthResponse  # noqa: E402
@@ -86,6 +88,8 @@ app.include_router(chatgpt_context.router, prefix=prefix)  # contexto ChatGPT if
 app.include_router(operaciones_simuladas.router, prefix=prefix)  # paper trading
 app.include_router(noticias.router, prefix=prefix)  # noticias (cache SQL)
 app.include_router(market_movers.router, prefix=prefix)  # movers (cache SQL)
+app.include_router(stock_scorecard.router, prefix=prefix)  # /api/stocks/* (auth en handler)
+app.include_router(scorecard_config.router, prefix=prefix)  # /api/scorecard/configs/*
 
 # ===== Solo administradores =====
 app.include_router(admin_users.router, prefix=prefix)

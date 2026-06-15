@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import AnalisisDibujo, Usuario
 from app.repositories.acciones_repository import AccionesRepository
 from app.repositories.dibujos_repository import DibujosRepository
+from app.repositories.layouts_repository import LayoutsRepository
 from app.schemas.drawings import DrawingIn, DrawingOut, DrawingPoint, DrawingStyle
 from app.security.dependencies import get_current_active_user
 
@@ -34,6 +35,7 @@ def _to_out(dibujo: AnalisisDibujo, ticker: str) -> DrawingOut:
     return DrawingOut(
         id=str(dibujo.C0101Id),
         symbol=ticker,
+        c030Id=dibujo.C030Id,
         sourceTimeframe=dibujo.TemporalidadOrigen,
         type=dibujo.TipoDibujo,
         points=[DrawingPoint(**p) for p in _safe_json(dibujo.PuntosJSON, [])],
@@ -51,13 +53,25 @@ def _to_out(dibujo: AnalisisDibujo, ticker: str) -> DrawingOut:
 @router.get("", response_model=list[DrawingOut])
 def list_drawings(
     symbol: str = Query(..., min_length=1),
+    c030Id: int | None = Query(None, description="Workspace activo (C030Id)"),
     db: Session = Depends(get_db),
     user: Usuario = Depends(get_current_active_user),
 ) -> list[DrawingOut]:
     accion = AccionesRepository(db).get_by_yahoo_symbol(symbol)
     if accion is None:
         return []  # sin instrumento registrado: no hay dibujos
-    dibujos = DibujosRepository(db).list_by_user_and_action(user.C005Id, accion.C010Id)
+    repo = DibujosRepository(db)
+    # Sin c030Id (callers heredados): comportamiento previo (todos del usuario).
+    if c030Id is None:
+        dibujos = repo.list_by_user_and_action(user.C005Id, accion.C010Id)
+        return [_to_out(d, accion.Ticker) for d in dibujos]
+    # Acotado al workspace activo. Los dibujos heredados (C030Id NULL) solo se
+    # incluyen si el workspace activo es el por defecto de la accion.
+    ws = LayoutsRepository(db).get_workspace(user.C005Id, c030Id)
+    include_legacy = bool(ws is not None and ws.EsDefault)
+    dibujos = repo.list_by_user_action_workspace(
+        user.C005Id, accion.C010Id, c030Id, include_legacy_null=include_legacy
+    )
     return [_to_out(d, accion.Ticker) for d in dibujos]
 
 
@@ -67,10 +81,20 @@ def create_drawing(
     db: Session = Depends(get_db),
     user: Usuario = Depends(get_current_active_user),
 ) -> DrawingOut:
+    # Un dibujo NUEVO siempre pertenece a un workspace (aislamiento por C030Id).
+    if payload.c030Id is None:
+        raise HTTPException(
+            status_code=400, detail="Workspace is required to create drawings."
+        )
     accion = AccionesRepository(db).get_or_create_from_yahoo_symbol(payload.symbol)
+    # Valida que el workspace sea del usuario y de ESTA accion.
+    ws = LayoutsRepository(db).get_workspace(user.C005Id, payload.c030Id)
+    if ws is None or ws.C010Id != accion.C010Id:
+        raise HTTPException(status_code=400, detail="Workspace inválido para el símbolo.")
     dibujo = DibujosRepository(db).create(
         user_id=user.C005Id,
         c010_id=accion.C010Id,
+        c030_id=payload.c030Id,
         tipo=payload.type,
         temporalidad_origen=payload.sourceTimeframe,
         puntos=[p.model_dump() for p in payload.points],

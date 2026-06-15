@@ -65,6 +65,23 @@ export interface ChartInstance {
   setSimulatedEntryLines?(
     lines: Array<{ price: number; color?: string | null; title?: string | null }>
   ): void;
+  /**
+   * Marcadores de ENTRADA EXACTA (tiempo+precio) de paper trading: una flecha
+   * anclada al bar mas cercano a la fecha de entrada (arriba/abajo segun
+   * LONG/SHORT), con etiqueta de tipo+precio. Es el punto exacto en la grafica,
+   * complementando la linea de precio (secundaria). El adapter ajusta el tiempo
+   * al bar real mas cercano por cada grafica/temporalidad. Opcional para no
+   * romper ChartInstance falsos en tests.
+   */
+  setSimulatedEntryMarkers?(
+    markers: Array<{
+      id: number;
+      timeMs: number;
+      type: "LONG" | "SHORT";
+      color?: string | null;
+      title?: string | null;
+    }>
+  ): void;
 }
 
 export interface ChartEngineAdapter {

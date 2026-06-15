@@ -12,8 +12,9 @@ function isServerId(id: string): boolean {
 }
 
 export class ApiDrawingRepository implements DrawingRepository {
-  async listBySymbol(symbol: string): Promise<Drawing[]> {
+  async listBySymbol(symbol: string, c030Id?: number): Promise<Drawing[]> {
     const q = new URLSearchParams({ symbol });
+    if (c030Id != null) q.set("c030Id", String(c030Id));
     const rows = await apiClient.get<Drawing[]>(`/drawings?${q.toString()}`);
     // La migracion local sigue aplicando (unidades de tiempo, defaults...).
     return rows.map((d) => migrateDrawing(d));

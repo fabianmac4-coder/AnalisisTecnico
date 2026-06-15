@@ -9,6 +9,7 @@ from app.models import (
     CatalogoUsuarioAccion,
     ChatConversacion,
     ChatMensaje,
+    ConfiguracionScorecard,
     IndicadorConfiguracion,
     LayoutGrafica,
     OperacionSimulada,
@@ -117,6 +118,7 @@ class UsersRepository:
         # 2) Conversaciones de IA (C110) y demas tablas hijas.
         for model in (
             ChatConversacion,
+            ConfiguracionScorecard,
             OperacionSimulada,
             PasswordToken,
             AnalisisDibujo,
