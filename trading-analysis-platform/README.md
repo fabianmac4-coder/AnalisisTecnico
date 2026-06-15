@@ -279,10 +279,28 @@ Los scripts de `backend/sql/` son **idempotentes** (se pueden re-ejecutar):
   guarda el **hash** del token, nunca el token en claro).
 - `004_ai_chat.sql` — crea `dbo.C110` (ChatConversaciones) y `dbo.C111`
   (ChatMensajes) para el AI Chat, con FKs a `C005`/`C010` e índices.
+- `005_operaciones_simuladas.sql` — crea `dbo.C050` (entradas simuladas / paper
+  trading por usuario+acción).
+- `006_news_and_market_movers.sql` — crea `dbo.C060`/`C061` (noticias + enlaces a
+  acción) y `dbo.C062`/`C063` (snapshots de market movers).
+- `008_remove_roic_module.sql` — elimina el módulo ROIC.ai descontinuado (limpieza
+  histórica; el scorecard usa solo Yahoo, sin proveedores de pago).
 - `009_chart_workspaces.sql` — agrega a `C030` las columnas `C010Id` (nullable,
   retrocompatible con layouts globales) y `Activo` (borrado suave), la FK
   `FK_C030_C010` y el índice `IX_C030_C005Id_C010Id`, para los **workspaces de
   análisis por acción**.
+- `010_workspace_scoped_drawings.sql` — agrega `C0101.C030Id` (nullable, FK
+  `FK_C0101_C030`) para aislar los **dibujos por workspace**.
+- `011_scorecard_config.sql` — crea `dbo.C081` (configuración del Stock Scorecard
+  por usuario, FK `FK_C081_C005`).
+- `012_simulated_entry_snapshot.sql` — agrega a `C050` las columnas `C030Id` (FK
+  `FK_C050_C030`), `MetadataJSON` y `AnalisisJSON` para el **snapshot de análisis**
+  de la entrada simulada.
+- `013_market_intelligence_cache.sql` — crea `dbo.C080` (cache compartido de
+  Inteligencia de Mercado, sentimiento y macro; no guarda datos de usuario).
+- `014_portfolios.sql` — crea `dbo.C090` (portafolios, FK `FK_C090_C005`) y
+  `dbo.C091` (posiciones, FKs `FK_C091_C090`/`FK_C091_C005`/`FK_C091_C010`) para
+  **Portfolio Analysis**.
 
 ```powershell
 cd backend

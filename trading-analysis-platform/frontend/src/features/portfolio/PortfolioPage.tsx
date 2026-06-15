@@ -45,6 +45,7 @@ export function PortfolioPage() {
   const load = usePortfolioStore((s) => s.loadPortfolios);
   const createPortfolio = usePortfolioStore((s) => s.createPortfolio);
   const openModal = usePortfolioStore((s) => s.openPositionModal);
+  const positionModalOpen = usePortfolioStore((s) => s.positionModalOpen);
 
   useEffect(() => {
     if (import.meta.env.MODE !== "test") void load();
@@ -117,7 +118,10 @@ export function PortfolioPage() {
           </div>
         )}
       </div>
-      <PositionFormModal />
+      {/* Se monta solo mientras está abierto: así el formulario toma estado
+          fresco de la posición a editar (los inicializadores de useState solo
+          corren al montar). */}
+      {positionModalOpen && <PositionFormModal />}
     </div>
   );
 }

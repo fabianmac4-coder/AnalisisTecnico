@@ -22,3 +22,6 @@ Thumbs.db
 
 # CA bundle generado para redes con proxy TLS
 backend/.certs/
+
+# TypeScript incremental build info (regenerated on every build)
+*.tsbuildinfo
