@@ -49,6 +49,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Cabeceras de seguridad básicas (seguras para dev; no rompen la API JSON).
+
+    No incluye HSTS (dev es HTTP) ni CSP (la API solo sirve JSON). En producción
+    tras HTTPS conviene añadir Strict-Transport-Security a nivel de proxy.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
+
 prefix = settings.api_prefix
 
 
