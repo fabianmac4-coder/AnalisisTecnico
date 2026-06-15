@@ -57,12 +57,15 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - Tables: `dbo.C005` users, `C006` password tokens, `C010` acciones, `C0101` drawings, `C020`
   indicator configs, `C030` layouts/analysis workspaces, `C040` user↔accion catalog, `C050`
   simulated/paper-trade entries, `C060` cached news, `C061` news↔accion links, `C062` market-mover
-  snapshots, `C063` snapshot items, `C081` scorecard scoring configs, `C110` AI chat conversations,
-  `C111` AI chat messages. Original tables have NO IDENTITY → new IDs come from `next_id()`
-  (`repositories/sql_utils.py`, MAX+1); ONLY the new tables C006/C050/C060-C063/C081/C110/C111 use
-  IDENTITY. `C030` (no IDENTITY) gained `C010Id` (nullable) + `Activo` via migration `009`; `C0101`
-  gained `C030Id` (nullable, workspace-scoped drawings) via migration `010`; `C081` is created by
-  migration `011`. See "Analysis workspaces" and "Stock Scorecard" below.
+  snapshots, `C063` snapshot items, `C080` market-intelligence/sentiment/macro cache, `C081` scorecard
+  scoring configs, `C090` portfolios, `C091` portfolio positions, `C110` AI chat conversations,
+  `C111` AI chat messages. Original tables have NO
+  IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1); ONLY the new tables
+  C006/C050/C060-C063/C080/C081/C110/C111 use IDENTITY. `C030` (no IDENTITY) gained `C010Id`
+  (nullable) + `Activo` via migration `009`; `C0101` gained `C030Id` (nullable, workspace-scoped
+  drawings) via migration `010`; `C081` is created by migration `011`; `C050` gained snapshot columns
+  via `012`; `C080` is created by migration `013`. See "Analysis workspaces", "Stock Scorecard" and
+  "Market Intelligence" below.
 - SQL Server does NOT support `NULLS LAST` — order with a portable
   `case((col.is_(None), 1), else_=0)` instead of `.nullslast()` (SQLite tests accept both, so only
   the real DB catches it).
@@ -129,9 +132,10 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - Soft deletes only: users → `Activo=0` + `FechaDesactivacion`; drawings → `Eliminado=1`;
   catalog rows → `Activo=0`; AI conversations → `C110.Activo=0`. No physical DELETEs of user data,
   with ONE deliberate exception: `DELETE /api/admin/users/{id}/hard-delete` (purge test users:
-  children first — C111 (via the user's C110 ids) → C110 → C081 → C050/C006/C0101/C020/C030/C040 —
-  then C005, single transaction — `UsersRepository.hard_delete_user`; guards: not self, not the last
-  active admin; frontend requires typing DELETE).
+  children first — C111 (via the user's C110 ids) → C110 → C081 → C091 → C090 →
+  C050/C006/C0101/C020/C030/C040 — then C005, single transaction — `UsersRepository.hard_delete_user`;
+  C091 antes que C090 por la FK; guards: not self, not the last active admin; frontend requires typing
+  DELETE).
 
 ### Auth rules
 - No public registration; admins create users (`/api/admin/users`). Created users get a password
@@ -340,6 +344,124 @@ Resumen ejecutivo por acción: `GET /api/stocks/{symbol}/scorecard` (auth; query
   default). `stockScorecardStore` (por símbolo) + `scorecardConfigStore` (`defaultConfig`+`configs[]`,
   con `weightsTotal`/`normalizeWeights`, `resetDefault`). El AI Chat (`buildScorecardExplainMessage`)
   y el prompt de ChatGPT incluyen los valores reales del breakdown (`scorecardKeyMetricsLines`).
+- **Tooltips "?"** (`ScorecardInfoTooltip` + `stockScorecardHelp.ts`): cada tarjeta de puntaje
+  (technicalScore/fundamentalScore/newsScore/sentimentScore/overallScore/riskLevel/confidence) y cada
+  `ScoreMetricCard` muestran un "?" hover/click. La clave de ayuda de una métrica se resuelve con
+  `metricHelpKey()` (`scorecardMetricHelpKeyMap.ts`: backend `sma20→priceVsSma20`, `bollinger→
+  bollingerPosition`, `priceToSales→priceSales`, etc.); si no hay entrada, NO se muestra icono. En las
+  `ScoreCard` (que son `<button>`) el "?" va como hermano absoluto, nunca anidado. Solo educativo: no
+  cambia el cálculo.
+
+### Market Intelligence & sentiment proxy (Fase 2, C080)
+Página `/market-intelligence` (`MarketIntelligencePage`) que da el entorno de mercado ANTES de analizar
+una acción. NO reemplaza el dashboard; NO es asesoría financiera (proxy de sentimiento, no el índice
+oficial de CNN). El frontend NUNCA llama a Yahoo directo: todo via `GET /api/market-intelligence/*`
+(auth en handler).
+- **Endpoints** (`routers/market_intelligence.py`, prefix `/market-intelligence`): `GET /overview`
+  (índices + sentimiento + fearGreed + movers summary + topNews + whatThisMeans) y `GET /sentiment`
+  (solo el proxy), ambos con `?forceRefresh`. Flags `ENABLE_MARKET_INTELLIGENCE`/`ENABLE_MARKET_SENTIMENT`.
+- **Sentiment service** (`services/sentiment/`): arquitectura de proveedores
+  (`SentimentProvider` base + `InternalMarketSentimentProvider`). Pondera VIX 30 % / S&P 25 % / NASDAQ
+  15 % / Russell 10 % / breadth de movers 10 % / tono de noticias 10 %; si falta un componente
+  **redistribuye** el peso y baja la confianza (sin VIX nunca es HIGH). Score 0-100 → label
+  `EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED` (display español en el front). Nunca lanza: todo
+  ausente → `score=None, label=UNAVAILABLE` con warning.
+- **MI service** (`services/market_intelligence_service.py`): índices best-effort (quote + sparkline 3M
+  diario + tendencia), REUTILIZA `market_movers_service.get_all_lists` y `news_service.get_global_news`
+  (no duplica C062/C063 ni C060), deriva el sentimiento de los mismos datos de índices ya descargados,
+  y arma `whatThisMeans` (reglas, sin IA). Cada sección captura su excepción → `warnings`; nunca tumba
+  el endpoint. Ante fallo total cae al último cache (`get_latest_any`) con warning.
+- **Cache C080** (`MarketCache` model + `MarketCacheRepository`): cache COMPARTIDO (no por usuario),
+  `store()` inserta fila IDENTITY y desactiva las previas de la misma `(TipoDato, Clave)`; `get_fresh`
+  lee la activa no expirada, `get_latest_any` la última aunque esté expirada. TTLs:
+  `MARKET_INTELLIGENCE_TTL_MINUTES`/`MARKET_SENTIMENT_TTL_MINUTES` (15). NUNCA guarda datos de usuario
+  ni secretos.
+- **Integraciones**: el Scorecard añade `sentimentSource` (`internal_market_sentiment_provider` |
+  `unavailable`) y su `_score_sentiment` usa los mismos umbrales ^VIX; el AI Chat envía un campo
+  opcional `marketIntelligence` (merge server-side) leído del `marketIntelligenceStore`; el prompt de
+  ChatGPT añade toggle **Inteligencia de Mercado** + tipo `market_context_analysis`.
+- **Frontend** (`features/marketIntelligence/`): `MarketIntelligencePage` compone `MarketSentimentPanel`
+  (`FearGreedGauge` gradiente miedo→codicia + desglose), `MajorIndicesPanel`/`MajorIndexCard` (sparkline
+  SVG), `MarketMoversSummaryPanel` (link a `/market-movers`), `MarketNewsSummaryPanel` (link a `/news`),
+  `WhatThisMeansPanel` (✨ Preguntar a la IA), `MarketIntelligenceRefreshButton`. Store
+  `marketIntelligenceStore`. Link en el Header (`market-intelligence-link` 🧠) para todos los autenticados.
+
+### Macro Dashboard (Fase 3, C080)
+Página `/macro` (`MacroPage`) con el entorno macro: tasas, inflación, empleo, curva, mercados globales
+y calendario. NO reemplaza Market Intelligence; es informativo (no señal de compra/venta). `GET
+/api/macro/overview?forceRefresh` (auth en handler). REUSA la tabla C080 (NO crea tabla nueva).
+- **Proveedores OPCIONALES** (`services/macro/`): `FredProvider` (indicadores de EE.UU.; requiere
+  `FRED_API_KEY`, sin clave → todos MISSING + warning, NUNCA falla), `yahoo_macro_provider` (proxies de
+  mercado: Tesoro ^FVX/^TNX/^TYX + FX incl. **USD/MXN (MXN=X)** + commodities + cripto vía
+  `yahoo_service`), `economic_calendar_provider` (ver abajo). El 2A del Tesoro sólo viene de FRED
+  (DGS2); sin él la curva es UNKNOWN.
+- **Producción industrial (INDPRO) + Ventas minoristas (RSAFS)**: reemplazan a los ISM PMI
+  (descontinuados gratis en FRED). Series CONFIGURABLES vía env `FRED_SERIES_INDUSTRIAL_PRODUCTION` /
+  `FRED_SERIES_RETAIL_SALES` (ver `ENV_SERIES_OVERRIDE`/`PERCENT_CHANGE_KEYS` en `fred_provider.py`);
+  trend por latest vs previous, `retailSales` reporta `changePercent` y se muestra en miles de millones
+  (`usd_millions_to_b`). El front ya NO renderiza `ismManufacturing`/`ismServices`.
+- **Calendario FRED** (`economic_calendar_provider.build_calendar` + `fred_release_config.py`): con
+  clave arma el calendario desde `fred/release/dates` para los releases de `IMPORTANT_FRED_RELEASES`
+  (CPI/NFP/GDP/PCE/FOMC/retail/sentimiento), release IDs resueltos por keyword y cacheados en C080
+  (`FRED_RELEASE_IDS`). Devuelve `(events, warnings, available, source)`; el overview añade
+  `economicCalendarAvailable`/`economicCalendarSource`. Sin clave o sin datos útiles → `available=False`
+  y el FRONT OCULTA el panel (no muestra una tarjeta vacía). NUNCA inventa fechas.
+- **Interpretación por reglas** (`macro_interpretation_service`): `yield_curve_status` (spread 10A-2A:
+  >0.5 NORMAL, 0–0.5 FLAT, <0 INVERTED, None UNKNOWN), `compute_risk` (GREEN/YELLOW/RED/UNKNOWN +
+  score + drivers/risks; usa inflación, nivel de tasas, empleo, PIB, curva y el VIX/sentimiento del
+  cache de Fase 2), `executive_summary`, `what_this_means`.
+- **macro_service** (`get_overview`): agrega best-effort, cachea en C080 (`MACRO_OVERVIEW`, TTL
+  `MACRO_CACHE_TTL_MINUTES`=60), fallback a cache viejo ante fallo total. `get_macro_context(db)` lee
+  SOLO el cache (sin red) y lo consumen el Scorecard (campo `macroContext` + un watchItem si el riesgo
+  es YELLOW/RED) y el AI Chat — si la página macro no se ha cargado, es None y nada falla.
+- **Integraciones**: AI Chat envía un campo opcional `macro` (merge server-side); el prompt de ChatGPT
+  añade toggle **Macro** + tipo `macro_market_stock_decision`; la página de Inteligencia muestra una
+  `MacroRiskMiniCard` compacta si el overview macro está disponible (defensiva: si no, no renderiza).
+- **Frontend** (`features/macro/`): `MacroPage` compone `MacroExecutiveSummary` (badge de riesgo +
+  drivers/risks), `InflationLaborPanel`, `UsaIndicatorsPanel`, `RatesYieldCurvePanel` (curva SVG +
+  badge), `GlobalMarketsPanel` (FX/commodities/cripto), `EconomicCalendarPanel`, `MacroMeaningPanel`
+  (✨ Preguntar a la IA); `MacroDataCard`/`MacroTrendBadge`/`MacroRiskBadge` reutilizables. Cada tarjeta
+  lleva un **`MacroInfoTooltip`** ("?" hover/click; textos en `macroIndicatorHelp.ts`, lookup por
+  `helpKey` que por defecto es la `key` — para FX/commodities/cripto se pasa `helpKey` de categoría).
+  El **`EconomicCalendarPanel` solo se monta si hay eventos** (`MacroPage` lo condiciona a
+  `economicCalendarAvailable && length>0`); si no, el `MacroMeaningPanel` ocupa el ancho — NUNCA un
+  panel grande vacío. Store `macroStore`. Link en el Header (`macro-link` 🌐). Vars de entorno:
+  `ENABLE_MACRO_DASHBOARD`, `MACRO_CACHE_TTL_MINUTES`, `MACRO_DEBUG`, `FRED_API_KEY`,
+  `FRED_API_BASE_URL`, `FRED_SERIES_INDUSTRIAL_PRODUCTION`, `FRED_SERIES_RETAIL_SALES`,
+  `ECONOMIC_CALENDAR_PROVIDER`, `ECONOMIC_CALENDAR_API_KEY`, `ECONOMIC_CALENDAR_TTL_MINUTES`.
+
+### Portfolio Analysis (Fase 4, C090/C091)
+Página `/portfolio` (`PortfolioPage`) para crear portafolios y posiciones y analizar valor, ganancia/
+pérdida, asignación, concentración, comparación vs S&P 500 y un resumen de IA. **Separado del
+watchlist** (C040): el watchlist son acciones seguidas; el portafolio son tenencias con cantidad/costo.
+Informativo, NO asesoría financiera. Migración `014_portfolios.sql`.
+- **Tablas NUEVAS IDENTITY**: `C090` portafolios (user-scoped, `EsDefault`/`Activo`, primer portafolio
+  = default) y `C091` posiciones (FK a C090/C005/C010; `C005Id` se guarda TAMBIÉN en C091 para acotar
+  por usuario sin join). Borrado suave `Activo=0`; borrar un portafolio desactiva sus posiciones.
+  `PortfolioRepository` acota TODO por `C005Id`. Hard-delete: C091 antes que C090 (FK).
+- **Endpoints** (`routers/portfolios.py`, prefix `/portfolios`, auth en handler, todo por C005Id):
+  `GET/POST /portfolios`, `PATCH/DELETE /portfolios/{c090Id}`, `PATCH …/set-default` (quita default de
+  los demás), `GET/POST /portfolios/{c090Id}/positions`, `PATCH/DELETE /portfolios/positions/{c091Id}`,
+  `GET /portfolios/{c090Id}/analysis`, `POST /portfolios/{c090Id}/ai-summary`. Alta de posición:
+  `quantity>0` y `averageCost>=0` (422 si no); enriquecimiento best-effort vía Yahoo (quote→moneda,
+  `get_fundamentals`→nombre/sector/industria) + `get_or_create_from_yahoo_symbol` (C010) — JAMÁS rompe.
+- **Análisis** (`services/portfolio_analysis_service.py`, nunca lanza): por posición costBasis/
+  currentValue/gainLoss(%)/peso (quote canónica; si falta → `dataWarnings` y se excluye del valor);
+  resumen total + mejor/peor; asignación por posición/sector/industria/tipo/moneda; concentración
+  (mayor posición, top3, mayor sector) + `riskLevel` (CONSERVATIVE/MODERATE/AGGRESSIVE/
+  HIGH_CONCENTRATION/UNKNOWN); benchmark vs `^GSPC` desde la fecha de compra más antigua (best-effort,
+  `get_ohlcv`; sin fechas → no disponible); recomendaciones por REGLAS (concentración/sector/
+  diversificación/moneda/ganadores/perdedores; lenguaje "revisar/confirmar/monitorear", nunca compra/
+  venta). Métricas avanzadas (beta/vol/Sharpe/drawdown) = null con nota: NO se inventan.
+- **AI summary**: `POST …/ai-summary` reutiliza `openai_service.generate_reply`; sin `OPENAI_API_KEY`
+  → `{available:false, message}` limpio. El AI Chat recibe un campo opcional `portfolio` (merge
+  server-side) y el prompt de ChatGPT añade toggle **Portafolio** + tipo `portfolio_analysis`.
+- **Frontend** (`features/portfolio/`): `PortfolioPage` compone `PortfolioSelector` (crear/editar/
+  eliminar/predeterminar/refrescar; prompts), `PortfolioSummaryCards`, `PositionsTable` (Abrir
+  dashboard vía `searchSymbol`, ★ watchlist, editar/eliminar), `PositionFormModal`,
+  `PortfolioAllocationCharts` (barras CSS + alertas), `PortfolioRiskPanel`, `PortfolioBenchmarkPanel`,
+  `PortfolioRecommendationsPanel`, `PortfolioAiSummaryPanel`, `PortfolioEmptyState`; export CSV.
+  Store `portfolioStore`. Link en el Header (`portfolio-link` 💼). Sin migración nueva más allá de 014.
 
 ### Time units
 Storage, API responses, and `DrawingPoint.time` are **Unix milliseconds UTC**. Lightweight Charts uses

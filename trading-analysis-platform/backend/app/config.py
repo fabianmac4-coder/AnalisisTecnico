@@ -112,6 +112,29 @@ class AppEnvSettings(BaseSettings):
     NEWS_GLOBAL_MAX_QUERIES_PER_REFRESH: int = 30
     NEWS_DEBUG: bool = False
 
+    # Inteligencia de Mercado + Sentimiento (Fase 2; cache compartido en C080).
+    ENABLE_MARKET_INTELLIGENCE: bool = True
+    ENABLE_MARKET_SENTIMENT: bool = True
+    MARKET_INTELLIGENCE_TTL_MINUTES: int = 15
+    MARKET_SENTIMENT_TTL_MINUTES: int = 15
+    MARKET_INTELLIGENCE_DEBUG: bool = False
+
+    # Macro Dashboard (Fase 3; cache compartido en C080). FRED y el proveedor de
+    # calendario son OPCIONALES: sin ellos la página muestra datos parciales.
+    ENABLE_MACRO_DASHBOARD: bool = True
+    MACRO_CACHE_TTL_MINUTES: int = 60
+    MACRO_DEBUG: bool = False
+    FRED_API_KEY: str = ""
+    FRED_API_BASE_URL: str = "https://api.stlouisfed.org/fred"
+    # Series FRED configurables para los indicadores de actividad real. Reemplazan
+    # a los ISM PMI (descontinuados gratis en FRED): producción industrial (INDPRO)
+    # y ventas minoristas (RSAFS), ambas fiables y disponibles.
+    FRED_SERIES_INDUSTRIAL_PRODUCTION: str = "INDPRO"
+    FRED_SERIES_RETAIL_SALES: str = "RSAFS"
+    ECONOMIC_CALENDAR_PROVIDER: str = ""
+    ECONOMIC_CALENDAR_API_KEY: str = ""
+    ECONOMIC_CALENDAR_TTL_MINUTES: int = 120
+
     @property
     def database_url(self) -> str:
         """URL de SQLAlchemy construida de forma segura (el server lleva `\\`)."""

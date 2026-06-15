@@ -29,6 +29,12 @@ export interface SendMessagePayload {
   channelRiskReward?: Record<string, unknown>;
   /** Workspace de análisis activo (nombre + configuración de slots). */
   workspace?: Record<string, unknown>;
+  /** Inteligencia de mercado (sentimiento + índices + movers + noticias). */
+  marketIntelligence?: Record<string, unknown>;
+  /** Contexto macro (riesgo, tasas, inflación, curva). */
+  macro?: Record<string, unknown>;
+  /** Contexto de portafolio (resumen/posiciones/asignación/riesgo). */
+  portfolio?: Record<string, unknown>;
 }
 
 export interface SendMessageResponse {

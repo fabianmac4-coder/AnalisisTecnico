@@ -21,6 +21,9 @@ from app.models.noticia_instrumento import NoticiaInstrumento
 from app.models.lista_mercado import ListaMercado
 from app.models.lista_mercado_detalle import ListaMercadoDetalle
 from app.models.configuracion_scorecard import ConfiguracionScorecard
+from app.models.market_cache import MarketCache
+from app.models.c090_portafolio import Portafolio
+from app.models.c091_posicion_portafolio import PosicionPortafolio
 
 __all__ = [
     "Usuario",
@@ -38,4 +41,7 @@ __all__ = [
     "ListaMercado",
     "ListaMercadoDetalle",
     "ConfiguracionScorecard",
+    "MarketCache",
+    "Portafolio",
+    "PosicionPortafolio",
 ]

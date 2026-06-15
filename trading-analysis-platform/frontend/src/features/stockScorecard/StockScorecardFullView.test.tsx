@@ -173,3 +173,49 @@ describe("StockScorecardFullView", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("StockScorecardFullView — tooltips de ayuda (?)", () => {
+  it("las tarjetas de puntaje (Técnico/Fundamental/Sentimiento) tienen icono '?'", () => {
+    render(<StockScorecardFullView symbol="AAPL" onClose={() => {}} />);
+    expect(screen.getByTestId("scorecard-info-technicalScore")).toBeTruthy();
+    expect(screen.getByTestId("scorecard-info-fundamentalScore")).toBeTruthy();
+    expect(screen.getByTestId("scorecard-info-sentimentScore")).toBeTruthy();
+    expect(screen.getByTestId("scorecard-info-newsScore")).toBeTruthy();
+    // General + riesgo + confianza también.
+    expect(screen.getByTestId("scorecard-info-overallScore")).toBeTruthy();
+    expect(screen.getByTestId("scorecard-info-riskLevel")).toBeTruthy();
+    expect(screen.getByTestId("scorecard-info-confidence")).toBeTruthy();
+  });
+
+  it("click en el '?' del puntaje técnico muestra la explicación detallada", () => {
+    render(<StockScorecardFullView symbol="AAPL" onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId("scorecard-info-technicalScore"));
+    const pop = screen.getByTestId("scorecard-info-popover-technicalScore");
+    expect(pop.textContent).toMatch(/tendencia de precio/i);
+    // Estructura enriquecida: cómo interpretarlo + lecturas + por qué importa.
+    expect(pop.textContent).toMatch(/Cómo interpretarlo/i);
+    expect(pop.textContent).toContain("Positiva:");
+    expect(pop.textContent).toContain("Negativa:");
+    expect(pop.textContent).toMatch(/Por qué importa/i);
+  });
+
+  it("la métrica técnica RSI muestra un '?' con su explicación", () => {
+    render(<StockScorecardFullView symbol="AAPL" onClose={() => {}} />);
+    const info = screen.getByTestId("scorecard-info-rsi14");
+    expect(info).toBeTruthy();
+    fireEvent.click(info);
+    expect(
+      screen.getByTestId("scorecard-info-popover-rsi14").textContent
+    ).toMatch(/Fuerza Relativa/i);
+  });
+
+  it("la métrica fundamental P/E tiene un '?' con explicación (click móvil)", () => {
+    render(<StockScorecardFullView symbol="AAPL" onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId("scorecard-tab-fundamentals"));
+    const info = screen.getByTestId("scorecard-info-peRatio");
+    fireEvent.click(info);
+    expect(
+      screen.getByTestId("scorecard-info-popover-peRatio").textContent
+    ).toMatch(/beneficio por acción/i);
+  });
+});

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useStockScorecardStore, selectScorecard } from "./stockScorecardStore";
 import { ScorecardSettings } from "./ScorecardSettings";
 import { StockScoreBadge } from "./StockScoreBadge";
+import { ScorecardInfoTooltip } from "./ScorecardInfoTooltip";
 import {
   ScoreMetricCard,
   groupMetrics,
@@ -37,39 +38,49 @@ function ScoreCard({
   score,
   active,
   onClick,
+  helpKey,
 }: {
   label: string;
   score: number | null;
   active: boolean;
   onClick: () => void;
+  helpKey?: string;
 }) {
+  // El "?" va FUERA del <button> (hermano absoluto) para no anidar botones.
   return (
-    <button
-      onClick={onClick}
-      data-testid={`scorecard-card-${label}`}
-      className={`flex flex-col items-center rounded-lg border px-3 py-2 ${
-        active ? "border-accent bg-panel-3" : "border-edge bg-panel-2 hover:bg-panel-3"
-      }`}
-    >
-      <span className={`font-mono text-2xl font-bold ${TONE_TEXT[scoreTone(score)]}`}>
-        {score === null ? "—" : score}
-      </span>
-      <div className="my-1 h-1 w-full overflow-hidden rounded bg-panel-3">
-        <div
-          className={
-            scoreTone(score) === "good"
-              ? "h-full bg-emerald-500"
-              : scoreTone(score) === "bad"
-                ? "h-full bg-red-500"
-                : scoreTone(score) === "warn"
-                  ? "h-full bg-amber-500"
-                  : "h-full bg-edge"
-          }
-          style={{ width: `${score === null ? 0 : Math.max(0, Math.min(100, score))}%` }}
-        />
-      </div>
-      <span className="text-[10px] uppercase tracking-wide text-muted">{label}</span>
-    </button>
+    <div className="relative">
+      {helpKey && (
+        <span className="absolute right-1 top-1 z-10">
+          <ScorecardInfoTooltip helpKey={helpKey} />
+        </span>
+      )}
+      <button
+        onClick={onClick}
+        data-testid={`scorecard-card-${label}`}
+        className={`flex w-full flex-col items-center rounded-lg border px-3 py-2 ${
+          active ? "border-accent bg-panel-3" : "border-edge bg-panel-2 hover:bg-panel-3"
+        }`}
+      >
+        <span className={`font-mono text-2xl font-bold ${TONE_TEXT[scoreTone(score)]}`}>
+          {score === null ? "—" : score}
+        </span>
+        <div className="my-1 h-1 w-full overflow-hidden rounded bg-panel-3">
+          <div
+            className={
+              scoreTone(score) === "good"
+                ? "h-full bg-emerald-500"
+                : scoreTone(score) === "bad"
+                  ? "h-full bg-red-500"
+                  : scoreTone(score) === "warn"
+                    ? "h-full bg-amber-500"
+                    : "h-full bg-edge"
+            }
+            style={{ width: `${score === null ? 0 : Math.max(0, Math.min(100, score))}%` }}
+          />
+        </div>
+        <span className="text-[10px] uppercase tracking-wide text-muted">{label}</span>
+      </button>
+    </div>
   );
 }
 
@@ -155,29 +166,34 @@ function FullViewBody({
           {/* Resumen ejecutivo */}
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
-              <StockScoreBadge view={sc.overallView} overallScore={sc.overallScore} />
+              <div className="flex items-center gap-1">
+                <StockScoreBadge view={sc.overallView} overallScore={sc.overallScore} />
+                <ScorecardInfoTooltip helpKey="overallScore" />
+              </div>
               <div className="flex items-center gap-4 text-xs">
-                <span>
+                <span className="flex items-center gap-1">
                   Riesgo:{" "}
                   <span className={TONE_TEXT[RISK_TONE[sc.riskLevel]]}>
                     {RISK_LABEL[sc.riskLevel]}
                   </span>
+                  <ScorecardInfoTooltip helpKey="riskLevel" />
                 </span>
-                <span className="text-muted">
+                <span className="flex items-center gap-1 text-muted">
                   Confianza:{" "}
                   <span className="text-gray-200">{CONFIDENCE_LABEL[sc.confidenceLevel]}</span>
+                  <ScorecardInfoTooltip helpKey="confidence" />
                 </span>
               </div>
               <p className="text-xs leading-snug text-gray-300">{sc.summary}</p>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              <ScoreCard label="Técnico" score={sc.technicalScore}
+              <ScoreCard label="Técnico" score={sc.technicalScore} helpKey="technicalScore"
                 active={tab === "technical"} onClick={() => setTab("technical")} />
-              <ScoreCard label="Fund." score={sc.fundamentalScore}
+              <ScoreCard label="Fund." score={sc.fundamentalScore} helpKey="fundamentalScore"
                 active={tab === "fundamentals"} onClick={() => setTab("fundamentals")} />
-              <ScoreCard label="News" score={sc.newsScore}
+              <ScoreCard label="News" score={sc.newsScore} helpKey="newsScore"
                 active={tab === "news"} onClick={() => setTab("news")} />
-              <ScoreCard label="Sent." score={sc.sentimentScore}
+              <ScoreCard label="Sent." score={sc.sentimentScore} helpKey="sentimentScore"
                 active={tab === "sentiment"} onClick={() => setTab("sentiment")} />
             </div>
           </div>

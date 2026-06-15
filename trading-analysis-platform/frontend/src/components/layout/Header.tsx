@@ -82,6 +82,30 @@ export function Header() {
         >
           🚀 Movers
         </Link>
+        <Link
+          to="/market-intelligence"
+          data-testid="market-intelligence-link"
+          title="Inteligencia de mercado: índices, sentimiento y resumen"
+          className="rounded-full border border-edge bg-panel-2 px-3 py-1 text-[11px] text-gray-200 hover:bg-panel-3"
+        >
+          🧠 Inteligencia
+        </Link>
+        <Link
+          to="/macro"
+          data-testid="macro-link"
+          title="Macro: tasas, inflación, empleo, curva y mercados globales"
+          className="rounded-full border border-edge bg-panel-2 px-3 py-1 text-[11px] text-gray-200 hover:bg-panel-3"
+        >
+          🌐 Macro
+        </Link>
+        <Link
+          to="/portfolio"
+          data-testid="portfolio-link"
+          title="Portafolio: posiciones, valor, asignación y riesgo de concentración"
+          className="rounded-full border border-edge bg-panel-2 px-3 py-1 text-[11px] text-gray-200 hover:bg-panel-3"
+        >
+          💼 Portafolio
+        </Link>
         <RefreshButton />
         <AutoRefreshMenu />
         <AiChatButton />

@@ -93,6 +93,12 @@ class SendMessageRequest(BaseModel):
     channelRiskReward: dict | None = None
     # Workspace de analisis activo (nombre + configuracion de los seis slots).
     workspace: dict | None = None
+    # Inteligencia de mercado (Fase 2): sentimiento + índices + movers + noticias.
+    marketIntelligence: dict | None = None
+    # Macro Dashboard (Fase 3): riesgo macro + tasas + inflación + curva.
+    macro: dict | None = None
+    # Portfolio Analysis (Fase 4): resumen/posiciones/asignación/riesgo.
+    portfolio: dict | None = None
 
 
 class SendMessageResponse(BaseModel):
@@ -235,6 +241,12 @@ def send_message(
             context["channelRiskReward"] = payload.channelRiskReward
         if payload.workspace:
             context["activeWorkspace"] = payload.workspace
+        if payload.marketIntelligence:
+            context["marketIntelligence"] = payload.marketIntelligence
+        if payload.macro:
+            context["macro"] = payload.macro
+        if payload.portfolio:
+            context["portfolio"] = payload.portfolio
         context_text = ai_context_service.context_to_text(context)
     except Exception:  # noqa: BLE001 - el contexto nunca debe romper el chat
         context_text = f'{{"symbol": "{symbol}", "context_available": false}}'

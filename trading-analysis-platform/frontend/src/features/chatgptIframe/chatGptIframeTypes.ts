@@ -9,7 +9,10 @@ export type ChatGptPromptType =
   | "risk_analysis"
   | "support_resistance"
   | "sector_comparison"
-  | "drawings_review";
+  | "drawings_review"
+  | "market_context_analysis"
+  | "macro_market_stock_decision"
+  | "portfolio_analysis";
 
 export const PROMPT_TYPE_LABELS: Record<ChatGptPromptType, string> = {
   general_analysis: "Análisis general",
@@ -20,6 +23,9 @@ export const PROMPT_TYPE_LABELS: Record<ChatGptPromptType, string> = {
   support_resistance: "Soportes y resistencias",
   sector_comparison: "Comparación ETF/sector",
   drawings_review: "Revisión de mis dibujos",
+  market_context_analysis: "Contexto de mercado + acción",
+  macro_market_stock_decision: "Macro + mercado + decisión",
+  portfolio_analysis: "Análisis de portafolio",
 };
 
 export interface ChatGptContext {
@@ -129,6 +135,12 @@ export interface ChatGptContextToggles {
   includeScorecard?: boolean;
   /** Incluir las métricas DETALLADAS del scorecard (valores reales). */
   includeScorecardMetrics?: boolean;
+  /** Incluir el contexto de Inteligencia de Mercado (sentimiento + índices). */
+  includeMarketIntelligence?: boolean;
+  /** Incluir el contexto del Macro Dashboard (riesgo, tasas, inflación, curva). */
+  includeMacro?: boolean;
+  /** Incluir el contexto del portafolio (posiciones, asignación, concentración). */
+  includePortfolio?: boolean;
 }
 
 // Config del iframe via variables de entorno del frontend (NUNCA API keys).

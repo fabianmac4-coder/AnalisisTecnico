@@ -25,9 +25,12 @@ from app.routers import (  # noqa: E402
     drawings,
     indicators,
     layouts,
+    macro,
     market,
+    market_intelligence,
     market_movers,
     noticias,
+    portfolios,
     operaciones_simuladas,
     scorecard_config,
     stock_scorecard,
@@ -88,6 +91,9 @@ app.include_router(chatgpt_context.router, prefix=prefix)  # contexto ChatGPT if
 app.include_router(operaciones_simuladas.router, prefix=prefix)  # paper trading
 app.include_router(noticias.router, prefix=prefix)  # noticias (cache SQL)
 app.include_router(market_movers.router, prefix=prefix)  # movers (cache SQL)
+app.include_router(market_intelligence.router, prefix=prefix)  # inteligencia de mercado (C080)
+app.include_router(macro.router, prefix=prefix)  # macro dashboard (C080)
+app.include_router(portfolios.router, prefix=prefix)  # portfolio analysis (C090/C091)
 app.include_router(stock_scorecard.router, prefix=prefix)  # /api/stocks/* (auth en handler)
 app.include_router(scorecard_config.router, prefix=prefix)  # /api/scorecard/configs/*
 

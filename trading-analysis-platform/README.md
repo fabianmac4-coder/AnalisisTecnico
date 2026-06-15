@@ -144,6 +144,13 @@ nunca da órdenes de compra/venta.
   `9 / 13 pts` con barra) y **fuente** abreviada (Técnico, Yahoo, Noticias,
   Mercado, Dibujos). El backend devuelve esto en `breakdown` por sección; los
   datos faltantes se manejan limpiamente como "Sin dato".
+- **Tooltips educativos "?"**: cada sección de puntaje (Técnico/Fundamental/
+  Noticias/Sentimiento/General/Riesgo/Confianza) y cada métrica (P/E, RSI, MACD,
+  Bollinger, precio vs SMA20/50/200, Canal R/R, ROE, ROA, Deuda/Capital, FCF,
+  VIX…) tiene un botón **"?"** (escritorio: hover; móvil: tap) que explica qué
+  mide y cómo interpretarlo. Textos en `stockScorecardHelp.ts`; las claves del
+  backend se mapean con `scorecardMetricHelpKeyMap.ts`. Los tooltips son
+  educativos y **no cambian el cálculo del puntaje**.
 - **Configuración de puntuación personalizable** (pestaña *Ajustes* /
   "Configuración de Scorecard"): edita los **pesos** (técnico/fundamental/
   noticias/sentimiento — deben sumar **100**: si no, hay error de validación y un
@@ -498,6 +505,140 @@ mercado, geopolítica/política y acciones en movimiento). La categoría
 y por qué (endpoint propio con TTL de 5 min y badges de tickers conocidos que
 abren la gráfica). Filtro por fuente (Todas/Yahoo/Google) y dedupe por URL
 normalizada (sin parámetros de tracking).
+
+### Inteligencia de Mercado y sentimiento (Fase 2)
+
+Página **🧠 Inteligencia** (`/market-intelligence`, para todos los usuarios
+autenticados) para entender el entorno de mercado **antes** de analizar una
+acción. No reemplaza el dashboard ni las gráficas.
+
+- **Índices principales**: S&P 500, NASDAQ, Dow, Russell 2000, VIX, FTSE 100,
+  DAX y Nikkei 225 — tarjetas con precio, cambio %, tendencia y mini-sparkline.
+  Todo via backend (`GET /api/market-intelligence/overview`); el frontend nunca
+  llama a Yahoo directo. Si un índice no está disponible, se muestra un estado
+  limpio (sin datos falsos).
+- **Sentimiento / Fear & Greed (proxy)**: gauge gradiente miedo→codicia con
+  puntaje 0-100, etiqueta (Miedo extremo / Miedo / Neutral / Codicia / Codicia
+  extrema), confianza, fuente y **desglose por componente** (VIX, S&P 500,
+  NASDAQ, Russell 2000, breadth de movers, tono de noticias). Es un **proxy
+  interno** (NO el índice oficial de CNN) y **no debe usarse como señal única de
+  compra/venta**. Pesos: VIX 30 % · S&P 25 % · NASDAQ 15 % · Russell 10 % ·
+  breadth 10 % · noticias 10 %; si falta un componente, se **redistribuye** el
+  peso y baja la confianza. Arquitectura de proveedores (`services/sentiment/`)
+  para enchufar un proveedor externo en el futuro.
+- **Resumen de market movers y de noticias**: reutilizan los módulos existentes
+  (C062/C063 y C060/C061) y enlazan a `/market-movers` y `/news`.
+- **Qué significa esto**: 3-5 bullets en español basados en reglas (sin llamada
+  a IA en cada carga) que traducen el entorno; botón **✨ Preguntar a la IA**
+  que abre el AI Chat con el contexto de mercado.
+- **Integraciones**: el **Stock Scorecard** reporta `sentimentSource` y comparte
+  los umbrales de ^VIX; el **AI Chat** y el **prompt de ChatGPT** (toggle
+  *Inteligencia de Mercado* + tipo *Contexto de mercado + acción*) incluyen el
+  sentimiento, los índices, los movers y los titulares cuando están disponibles.
+  La IA usa lenguaje de escenarios, nunca señales garantizadas.
+- **Cache y robustez** (`dbo.C080`, cache COMPARTIDO con TTL): se sirve cache
+  salvo `forceRefresh=true`; si un proveedor falla y hay cache, se devuelve el
+  cache con aviso; si falla y no hay cache, respuesta **parcial con warnings**.
+  Nunca tumba la página ni guarda datos de usuario. Variables de entorno:
+  `ENABLE_MARKET_INTELLIGENCE`, `ENABLE_MARKET_SENTIMENT`,
+  `MARKET_INTELLIGENCE_TTL_MINUTES`, `MARKET_SENTIMENT_TTL_MINUTES`,
+  `MARKET_INTELLIGENCE_DEBUG`.
+
+### Macro Dashboard (Fase 3)
+
+Página **🌐 Macro** (`/macro`, para todos los usuarios autenticados) con el
+entorno macroeconómico que afecta a acciones, sectores, tasas y apetito de
+riesgo. No reemplaza Inteligencia de Mercado; es un módulo aparte e informativo.
+
+- **Resumen de riesgo macro**: badge GREEN/YELLOW/RED/UNKNOWN con score, factores
+  y riesgos, calculado por reglas a partir de inflación, nivel de tasas, empleo,
+  PIB, curva de rendimientos y el sentimiento/VIX de la Fase 2.
+- **Tooltips de ayuda**: cada tarjeta tiene un botón **"?"** (escritorio: hover;
+  móvil: tap) que explica qué mide el indicador, por qué importa y cómo
+  interpretar valores altos/bajos. Textos centralizados en `macroIndicatorHelp.ts`.
+- **Indicadores de EE.UU.** (Fed Funds, CPI, PCE, desempleo, nóminas, PIB, ISM,
+  confianza): vía **`FRED_API_KEY`**. Sin clave se muestran como *Unavailable*
+  con un aviso limpio — la página **no falla**.
+- **Producción industrial (INDPRO) y Ventas minoristas (RSAFS)**: reemplazan a
+  los ISM PMI (descontinuados gratis en FRED y por eso poco fiables). Producción
+  industrial es un proxy de la actividad/output industrial real; ventas
+  minoristas es un proxy del consumo. Series **configurables** vía
+  `FRED_SERIES_INDUSTRIAL_PRODUCTION` / `FRED_SERIES_RETAIL_SALES`; tendencia por
+  última lectura vs previa (y % de cambio en ventas minoristas).
+- **Tasas y curva de rendimientos**: Tesoro 2/5/10/30 años (5/10/30 vía Yahoo;
+  2 años vía FRED) con estado de la curva (Normal / Plana / Invertida / Sin
+  datos) y mini-gráfico de la curva.
+- **Mercados globales**: FX (EUR/USD, GBP/USD, USD/JPY, USD/CHF, **USD/MXN**),
+  materias primas (oro, plata, WTI, Brent, gas) y cripto (BTC, ETH, BNB, SOL, XRP)
+  vía Yahoo Finance (el frontend nunca llama a Yahoo directo).
+- **Calendario económico (FRED)**: con `FRED_API_KEY` se arma con las **fechas de
+  publicación** de FRED (`release/dates`) para los releases clave (CPI, NFP, GDP,
+  PCE, FOMC, ventas minoristas, sentimiento del consumidor); los release IDs se
+  resuelven por keyword y se cachean en C080. Incluye una nota de que las fechas
+  de FRED las publican las fuentes y pueden no coincidir con la disponibilidad
+  exacta del dato. **Nunca inventa fechas**; si no hay datos útiles, la sección se
+  **oculta** (no se muestra un panel grande vacío) y el aviso aparece en las
+  advertencias de la página.
+- **Qué significa esto para inversionistas**: 3-6 bullets en español por reglas
+  (sin IA en cada carga) + botón **✨ Preguntar a la IA**.
+- **Integraciones**: el **Stock Scorecard** incluye `macroContext` (riesgo, curva,
+  inflación) y un *watch item* cuando el riesgo macro es moderado/elevado; el
+  **AI Chat** y el **prompt de ChatGPT** (toggle *Macro* + tipo *Macro + mercado
+  + decisión*) usan el contexto macro cuando está disponible; la página de
+  Inteligencia muestra una tarjeta compacta de riesgo macro. La IA usa lenguaje
+  de escenarios, nunca predicciones garantizadas.
+- **Cache y robustez** (`dbo.C080`, compartido con Fase 2; TTL
+  `MACRO_CACHE_TTL_MINUTES`): se sirve cache salvo `forceRefresh=true`; si un
+  proveedor falla y hay cache, se devuelve el cache con aviso; si falla y no hay
+  cache, respuesta **parcial con warnings**. Aclaraciones:
+  - Los indicadores de EE.UU. y el calendario usan FRED; Yahoo aporta los proxies
+    de mercado (tasas largas, FX, commodities, cripto).
+  - Si faltan proveedores o series, el resultado son **datos parciales con avisos
+    específicos, no un fallo** — y los paneles sin datos útiles se ocultan.
+  - El Macro Dashboard es informativo, **no es una señal de trading**.
+- **Variables de entorno**: `ENABLE_MACRO_DASHBOARD`, `MACRO_CACHE_TTL_MINUTES`,
+  `MACRO_DEBUG`, `FRED_API_KEY`, `FRED_API_BASE_URL`,
+  `FRED_SERIES_INDUSTRIAL_PRODUCTION` (INDPRO), `FRED_SERIES_RETAIL_SALES` (RSAFS),
+  `ECONOMIC_CALENDAR_PROVIDER`, `ECONOMIC_CALENDAR_API_KEY`,
+  `ECONOMIC_CALENDAR_TTL_MINUTES`. La tabla `C080` cachea inteligencia de mercado,
+  sentimiento, datos macro y el mapeo de release IDs de FRED.
+
+### Portfolio Analysis (Fase 4)
+
+Página **💼 Portafolio** (`/portfolio`, para todos los usuarios autenticados):
+crea portafolios, agrega posiciones y analiza valor, ganancia/pérdida,
+asignación, concentración y comparación con el mercado. Es un módulo **separado
+del watchlist** (el watchlist son acciones que sigues; el portafolio son
+tenencias con cantidad y costo). Informativo, **no es asesoría financiera**.
+
+- **Portafolios y posiciones** (`dbo.C090`/`dbo.C091`, acotados por usuario):
+  crea/edita/elimina (borrado suave) portafolios, fija uno como predeterminado y
+  agrega/edita/elimina posiciones (ticker, cantidad, costo promedio, fecha,
+  notas). Al agregar una posición el backend enriquece el instrumento con Yahoo
+  (nombre, sector, industria, moneda) — best-effort, nunca falla.
+- **Resumen**: costo total, valor actual, P/L $ y %, número de posiciones, mejor
+  y peor posición. Cada posición muestra precio actual (cotización canónica),
+  valor, P/L y peso; si falta la cotización, se marca con aviso.
+- **Asignación**: por posición, sector, tipo de activo y moneda (barras), con
+  alertas de concentración (posición > 20%, sector > 40%, top 3 > 60%).
+- **Riesgo**: nivel (Conservador/Moderado/Agresivo/Alta concentración/Sin datos)
+  + concentración (mayor posición, top 3, mayor sector). Las métricas avanzadas
+  (beta, volatilidad, Sharpe, drawdown) se muestran como no disponibles hasta
+  tener histórico — **no se inventan valores**.
+- **Comparación vs S&P 500** (`^GSPC`): usa la fecha de compra más antigua como
+  aproximación (claramente etiquetado); si no hay fechas, estado limpio "no
+  disponible".
+- **Recomendaciones por reglas**: concentración, sector, diversificación, moneda,
+  ganadores/perdedores, con lenguaje de *revisar/confirmar/monitorear* (nunca
+  órdenes de compra/venta).
+- **Resumen con IA** (botón, bajo demanda): envía el contexto del portafolio al
+  servicio de IA y devuelve un resumen en español; sin `OPENAI_API_KEY` muestra
+  "Resumen de IA no disponible" limpio. El **AI Chat** y el **prompt de ChatGPT**
+  (toggle *Portafolio* + tipo *Análisis de portafolio*) también usan el contexto
+  del portafolio. Nunca da asesoría garantizada.
+- **Export CSV** de las posiciones. Cada usuario solo ve/edita sus propios
+  portafolios y posiciones (acotado por `C005Id`); el hard-delete de usuario
+  elimina también C090/C091.
 
 ### Dibujos editables y canal auto-detectado
 

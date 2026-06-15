@@ -12,6 +12,9 @@ import { MyAccountPage } from "./features/account/MyAccountPage";
 import { ChangePasswordPage } from "./features/account/ChangePasswordPage";
 import { NewsPage } from "./features/news/NewsPage";
 import { MarketMoversPage } from "./features/marketMovers/MarketMoversPage";
+import { MarketIntelligencePage } from "./features/marketIntelligence/MarketIntelligencePage";
+import { MacroPage } from "./features/macro/MacroPage";
+import { PortfolioPage } from "./features/portfolio/PortfolioPage";
 import { useAuthStore } from "./features/auth/authStore";
 import "./index.css";
 
@@ -47,6 +50,30 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <ProtectedRoute>
                   <MarketMoversPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/market-intelligence"
+              element={
+                <ProtectedRoute>
+                  <MarketIntelligencePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/macro"
+              element={
+                <ProtectedRoute>
+                  <MacroPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/portfolio"
+              element={
+                <ProtectedRoute>
+                  <PortfolioPage />
                 </ProtectedRoute>
               }
             />

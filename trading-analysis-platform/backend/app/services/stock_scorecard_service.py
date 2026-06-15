@@ -432,7 +432,9 @@ def _score_sentiment(config: dict | None = None) -> dict:
     low = float(config.get("vixLowRiskMax", 16))
     med = float(config.get("vixMediumRiskMax", 24))
     high = float(config.get("vixHighRiskAbove", 30))
-    out = {"score": None, "metrics": [], "strengths": [], "risks": []}
+    # Misma lógica/umbrales que el proveedor interno de sentimiento (Fase 2).
+    out = {"score": None, "metrics": [], "strengths": [], "risks": [],
+           "source": "unavailable"}
     vix = sp = None
     try:
         vix = yahoo_service.get_quote("^VIX")
@@ -467,6 +469,7 @@ def _score_sentiment(config: dict | None = None) -> dict:
         metrics.append(_metric("vix", "VIX", v, SRC_MARKET, st, 0, 0, exp,
                                display=f"{v:.1f}"))
     out["score"] = round(_clamp(score, 0, 100))
+    out["source"] = "internal_market_sentiment_provider"
     out["strengths"] = [m["explanation"] for m in metrics if m["status"] == POSITIVE]
     out["risks"] = [m["explanation"] for m in metrics if m["status"] == NEGATIVE]
     return out
@@ -699,8 +702,24 @@ def build_stock_scorecard(
         except Exception:  # noqa: BLE001
             pass
 
+    # Contexto macro (Fase 3): SOLO lee el cache C080 (sin red); None si la
+    # página macro no se ha cargado. Nunca rompe el scorecard.
+    macro_context = None
+    try:
+        from app.services import macro as macro_service
+        macro_context = macro_service.get_macro_context(db)
+    except Exception:  # noqa: BLE001
+        macro_context = None
+    macro_watch: list[str] = []
+    if macro_context and macro_context.get("riskLevel") in ("YELLOW", "RED"):
+        macro_watch.append(
+            "Vigila los próximos datos de inflación/Fed: las acciones de valuación "
+            "alta pueden reaccionar con fuerza"
+        )
+
     watch = _dedupe(
-        user_watch + tech["watch"] + fund["watch"] + ["Canal R/R si está disponible"],
+        user_watch + tech["watch"] + fund["watch"] + macro_watch
+        + ["Canal R/R si está disponible"],
         limit=6,
     )
     strengths = _dedupe(
@@ -717,6 +736,7 @@ def build_stock_scorecard(
         "fundamentalScore": fund["score"],
         "newsScore": news["score"],
         "sentimentScore": sent["score"],
+        "sentimentSource": sent.get("source", "unavailable"),
         "overallScore": overall,
         "riskLevel": risk,
         "confidenceLevel": confidence,
@@ -725,6 +745,7 @@ def build_stock_scorecard(
         "strengths": strengths,
         "risks": risks,
         "watchItems": watch,
+        "macroContext": macro_context,
         "dataAvailability": {
             "technical": tech["available"],
             "fundamentals": fund["available"],

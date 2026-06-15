@@ -74,7 +74,68 @@ const REQUESTS: Record<ChatGptPromptType, string[]> = {
     "Qué niveles me faltan por marcar",
     "Cómo usar mis dibujos para definir confirmación e invalidación",
   ],
+  market_context_analysis: [
+    "Cómo está el entorno de mercado hoy (índices, volatilidad y sentimiento)",
+    "Si el mercado general apoya o no una entrada en este instrumento ahora",
+    "Qué riesgos de mercado podrían afectar esta acción",
+    "Cómo combinar el contexto de mercado con la lectura técnica de la acción",
+    "Preguntas que debería investigar antes de actuar",
+  ],
+  macro_market_stock_decision: [
+    "Explica el telón de fondo macro actual (tasas, inflación, curva de rendimientos)",
+    "Conecta ese contexto macro con esta acción en concreto",
+    "Identifica los principales riesgos macro y de mercado para esta acción",
+    "Qué señales confirmarían o invalidarían la tesis (sin afirmaciones garantizadas)",
+    "Un marco de decisión paso a paso combinando macro + mercado + técnico",
+  ],
+  portfolio_analysis: [
+    "Evalúa qué tan diversificado está el portafolio",
+    "Identifica los riesgos de concentración (posiciones y sectores)",
+    "Señala qué posiciones ayudan o perjudican el desempeño",
+    "Compara el desempeño del portafolio con el mercado",
+    "Qué debería vigilar (sin asesoría de compra/venta garantizada)",
+  ],
 };
+
+/** Contexto compacto de Inteligencia de Mercado para el prompt de ChatGPT. */
+export interface MarketIntelligencePromptContext {
+  sentiment?: { score: number | null; label: string; confidence: string } | null;
+  vix?: number | null;
+  indices?: Array<{ symbol: string; changePercent: number | null; trend: string }>;
+  topGainer?: string | null;
+  topLoser?: string | null;
+  topNews?: Array<string | null>;
+  whatThisMeans?: string[];
+}
+
+/** Contexto compacto del portafolio para el prompt de ChatGPT. */
+export interface PortfolioPromptContext {
+  name?: string | null;
+  totalCost?: number | null;
+  currentValue?: number | null;
+  totalGainLossPercent?: number | null;
+  positionCount?: number | null;
+  riskLevel?: string | null;
+  largestPosition?: string | null;
+  largestPositionWeight?: number | null;
+  top3Weight?: number | null;
+  benchmarkAlpha?: number | null;
+  topPositions?: Array<{ ticker: string; weight: number | null; gainLossPercent: number | null }>;
+  recommendations?: string[];
+}
+
+/** Contexto compacto del Macro Dashboard para el prompt de ChatGPT. */
+export interface MacroPromptContext {
+  riskLevel?: string | null;
+  riskLabel?: string | null;
+  summary?: string | null;
+  curveStatus?: string | null;
+  inflationTrend?: string | null;
+  fedFundsDisplay?: string | null;
+  treasury10YDisplay?: string | null;
+  calendar?: Array<{ eventName: string; date: string | null; impact: string }>;
+  whatThisMeans?: string[];
+}
 
 function fmt(value: number | null | undefined, digits = 2): string {
   return value == null ? "n/d" : value.toFixed(digits);
@@ -109,7 +170,13 @@ export function buildChatGptPrompt(
     chartContext: { slotId: string; range: string; interval: string }[];
   } | null,
   /** Stock Scorecard del símbolo (si el toggle está activo y ya se calculó). */
-  scorecard?: StockScorecardResponse | null
+  scorecard?: StockScorecardResponse | null,
+  /** Inteligencia de mercado (si el toggle está activo y ya se cargó). */
+  marketIntelligence?: MarketIntelligencePromptContext | null,
+  /** Contexto macro (si el toggle está activo y ya se cargó). */
+  macro?: MacroPromptContext | null,
+  /** Contexto de portafolio (si el toggle está activo y ya se cargó). */
+  portfolio?: PortfolioPromptContext | null
 ): string {
   const lines: string[] = [];
   const symbol = context.symbol;
@@ -362,6 +429,83 @@ export function buildChatGptPrompt(
         lines.push("Métricas detalladas:");
         lines.push(...metricLines);
       }
+    }
+  }
+
+  if (toggles.includeMarketIntelligence && marketIntelligence) {
+    const mi = marketIntelligence;
+    lines.push("");
+    lines.push("Inteligencia de mercado de hoy (entorno general, no señal de compra/venta):");
+    if (mi.sentiment && mi.sentiment.score != null) {
+      lines.push(
+        `- Sentimiento (proxy Fear & Greed): ${mi.sentiment.score}/100 (${mi.sentiment.label}, confianza ${mi.sentiment.confidence})`
+      );
+    }
+    if (mi.vix != null) lines.push(`- VIX: ${fmt(mi.vix)}`);
+    if (mi.indices?.length) {
+      const trends = mi.indices
+        .filter((i) => i.changePercent != null)
+        .slice(0, 6)
+        .map((i) => `${i.symbol} ${i.changePercent! >= 0 ? "+" : ""}${i.changePercent!.toFixed(2)}%`)
+        .join(", ");
+      if (trends) lines.push(`- Índices: ${trends}`);
+    }
+    if (mi.topGainer || mi.topLoser) {
+      lines.push(
+        `- Movers: mayor subida ${mi.topGainer ?? "n/d"}, mayor caída ${mi.topLoser ?? "n/d"}`
+      );
+    }
+    const headlines = (mi.topNews ?? []).filter(Boolean).slice(0, 3);
+    if (headlines.length) {
+      lines.push("- Titulares de mercado:");
+      for (const h of headlines) lines.push(`  · ${h}`);
+    }
+    if (mi.whatThisMeans?.length) {
+      lines.push("- Qué significa: " + mi.whatThisMeans.slice(0, 3).join(" | "));
+    }
+  }
+
+  if (toggles.includePortfolio && portfolio) {
+    lines.push("");
+    lines.push("Portafolio del usuario (informativo, no es asesoría):");
+    if (portfolio.name) lines.push(`- Nombre: ${portfolio.name}`);
+    lines.push(
+      `- Valor: ${portfolio.currentValue ?? "n/d"} · P/L ${portfolio.totalGainLossPercent ?? "n/d"}% · `
+      + `${portfolio.positionCount ?? 0} posiciones · riesgo ${portfolio.riskLevel ?? "n/d"}`
+    );
+    if (portfolio.largestPosition) {
+      lines.push(
+        `- Mayor posición: ${portfolio.largestPosition} (${portfolio.largestPositionWeight ?? "?"}%) · `
+        + `top3 ${portfolio.top3Weight ?? "?"}%`
+      );
+    }
+    if (portfolio.benchmarkAlpha != null) lines.push(`- Alpha vs S&P 500: ${portfolio.benchmarkAlpha}%`);
+    for (const p of (portfolio.topPositions ?? []).slice(0, 6)) {
+      lines.push(`  · ${p.ticker}: ${p.weight ?? "?"}% · P/L ${p.gainLossPercent ?? "?"}%`);
+    }
+    for (const r of (portfolio.recommendations ?? []).slice(0, 4)) {
+      lines.push(`- Alerta: ${r}`);
+    }
+  }
+
+  if (toggles.includeMacro && macro) {
+    lines.push("");
+    lines.push("Contexto macro de hoy (entorno general, no señal de compra/venta):");
+    if (macro.riskLabel) {
+      lines.push(`- Riesgo macro: ${macro.riskLabel}${macro.riskLevel ? ` (${macro.riskLevel})` : ""}`);
+    }
+    if (macro.summary) lines.push(`- Resumen: ${macro.summary}`);
+    if (macro.curveStatus) lines.push(`- Curva de rendimientos: ${macro.curveStatus}`);
+    if (macro.inflationTrend) lines.push(`- Tendencia de inflación: ${macro.inflationTrend}`);
+    if (macro.fedFundsDisplay) lines.push(`- Tasa de la Fed: ${macro.fedFundsDisplay}`);
+    if (macro.treasury10YDisplay) lines.push(`- Tesoro 10 años: ${macro.treasury10YDisplay}`);
+    const evs = (macro.calendar ?? []).slice(0, 3);
+    if (evs.length) {
+      lines.push("- Próximos eventos macro:");
+      for (const e of evs) lines.push(`  · ${e.eventName}${e.date ? ` (${e.date})` : ""} [${e.impact}]`);
+    }
+    if (macro.whatThisMeans?.length) {
+      lines.push("- Qué significa: " + macro.whatThisMeans.slice(0, 3).join(" | "));
     }
   }
 

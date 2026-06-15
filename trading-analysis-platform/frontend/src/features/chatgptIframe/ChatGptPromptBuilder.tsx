@@ -10,7 +10,10 @@ const TOGGLES: Array<{
     | "includeFavoriteStatus"
     | "includeTimeframeSummary"
     | "includeScorecard"
-    | "includeScorecardMetrics";
+    | "includeScorecardMetrics"
+    | "includeMarketIntelligence"
+    | "includeMacro"
+    | "includePortfolio";
   label: string;
 }> = [
   { key: "includePriceSummary", label: "Precio" },
@@ -21,6 +24,9 @@ const TOGGLES: Array<{
   { key: "includeTimeframeSummary", label: "Temporalidades" },
   { key: "includeScorecard", label: "Stock Scorecard" },
   { key: "includeScorecardMetrics", label: "Métricas detalladas" },
+  { key: "includeMarketIntelligence", label: "Inteligencia de Mercado" },
+  { key: "includeMacro", label: "Macro" },
+  { key: "includePortfolio", label: "Portafolio" },
 ];
 
 /**

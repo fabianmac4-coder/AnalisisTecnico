@@ -14,6 +14,8 @@ from app.models import (
     LayoutGrafica,
     OperacionSimulada,
     PasswordToken,
+    PosicionPortafolio,
+    Portafolio,
     Usuario,
 )
 from app.repositories.sql_utils import next_id, utcnow
@@ -115,10 +117,13 @@ class UsersRepository:
         self.db.execute(
             delete(ChatMensaje).where(ChatMensaje.C110Id.in_(user_conversations))
         )
-        # 2) Conversaciones de IA (C110) y demas tablas hijas.
+        # 2) Conversaciones de IA (C110) y demas tablas hijas. C091 (posiciones)
+        #    antes que C090 (portafolios) por la FK; ambas antes que C005.
         for model in (
             ChatConversacion,
             ConfiguracionScorecard,
+            PosicionPortafolio,
+            Portafolio,
             OperacionSimulada,
             PasswordToken,
             AnalisisDibujo,

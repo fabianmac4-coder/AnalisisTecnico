@@ -198,6 +198,71 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       // Workspace de analisis activo: nombre + los seis slots (range/interval).
       const workspace = await buildActiveWorkspaceContext();
 
+      // Inteligencia de mercado (si el usuario abrio esa pagina y se cargo):
+      // viaja un resumen compacto del entorno (sentimiento + indices + movers).
+      const { useMarketIntelligenceStore } = await import(
+        "@/features/marketIntelligence/marketIntelligenceStore"
+      );
+      const overview = useMarketIntelligenceStore.getState().overview;
+      const marketIntelligence = overview
+        ? {
+            sentiment: {
+              score: overview.sentiment.score,
+              label: overview.sentiment.label,
+              confidence: overview.sentiment.confidence,
+            },
+            indices: overview.indices.map((i) => ({
+              symbol: i.symbol,
+              changePercent: i.changePercent,
+              trend: i.trend,
+            })),
+            movers: {
+              topGainer: overview.marketMoversSummary.topGainers[0]?.symbol ?? null,
+              topLoser: overview.marketMoversSummary.topLosers[0]?.symbol ?? null,
+            },
+            topNews: overview.topNews.slice(0, 3).map((n) => n.title),
+            whatThisMeans: overview.whatThisMeans.slice(0, 3),
+          }
+        : undefined;
+
+      // Macro Dashboard (si el usuario abrió esa página y se cargó): contexto
+      // compacto del entorno macro (riesgo + tasas + inflación + curva).
+      const { useMacroStore } = await import("@/features/macro/macroStore");
+      const macroOverview = useMacroStore.getState().overview;
+      const macro = macroOverview
+        ? {
+            riskLevel: macroOverview.executiveSummary.riskLevel,
+            riskLabel: macroOverview.executiveSummary.riskLabel,
+            summary: macroOverview.executiveSummary.summary,
+            curveStatus: macroOverview.rates.curveStatus,
+            inflationTrend: macroOverview.usaIndicators.cpi?.trend ?? null,
+            whatThisMeans: macroOverview.whatThisMeans.slice(0, 3),
+          }
+        : undefined;
+
+      // Portafolio (si el usuario abrió esa página y se cargó el análisis):
+      // resumen + concentración + posiciones top para preguntas de portafolio.
+      const { usePortfolioStore } = await import("@/features/portfolio/portfolioStore");
+      const pa = usePortfolioStore.getState().analysis;
+      const portfolio = pa
+        ? {
+            name: pa.portfolio.name,
+            summary: pa.summary,
+            riskLevel: pa.risk.riskLevel,
+            concentration: pa.risk.concentrationRisk,
+            topPositions: [...pa.positions]
+              .sort((a, b) => (b.portfolioWeight ?? 0) - (a.portfolioWeight ?? 0))
+              .slice(0, 8)
+              .map((p) => ({
+                ticker: p.ticker,
+                weight: p.portfolioWeight,
+                gainLossPercent: p.gainLossPercent,
+                sector: p.sector,
+              })),
+            recommendations: pa.recommendations.slice(0, 6),
+          }
+        : undefined;
+
       const res = await aiChatService.sendMessage(conversationId, {
         message,
         includeChartContext: state.includeChartContext,
@@ -208,6 +273,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
           ? channelResultForAi(channelResult, confidence, channelTimeframe)
           : undefined,
         workspace,
+        marketIntelligence,
+        macro,
+        portfolio,
       });
       set((prev) => ({
         messagesByConversation: {

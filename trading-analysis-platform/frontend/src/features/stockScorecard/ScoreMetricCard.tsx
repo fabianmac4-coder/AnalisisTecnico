@@ -7,6 +7,8 @@ import {
   TONE_TEXT,
   type ScoreMetric,
 } from "./stockScorecardTypes";
+import { ScorecardInfoTooltip } from "./ScorecardInfoTooltip";
+import { metricHelpKey } from "./scorecardMetricHelpKeyMap";
 
 const SOURCE_SHORT: Record<string, string> = {
   "Internal technical calculation": "Técnico",
@@ -37,8 +39,11 @@ export function ScoreMetricCard({ metric }: { metric: ScoreMetric }) {
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-[11px] text-muted">{metric.label}</span>
-        <span className={`rounded border px-1 py-0.5 text-[9px] ${TONE_BADGE[tone]}`}>
-          {METRIC_STATUS_LABEL[metric.status]}
+        <span className="flex shrink-0 items-center gap-1">
+          <span className={`rounded border px-1 py-0.5 text-[9px] ${TONE_BADGE[tone]}`}>
+            {METRIC_STATUS_LABEL[metric.status]}
+          </span>
+          <ScorecardInfoTooltip helpKey={metricHelpKey(metric.key)} />
         </span>
       </div>
       <span className={`font-mono text-base font-bold ${TONE_TEXT[tone]}`}>
