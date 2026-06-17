@@ -22,6 +22,11 @@ class OHLCVResponse(BaseModel):
     priceBasis: str = "raw"
     currency: str | None = None
     timezone: str | None = None
+    # Zona horaria del MERCADO/exchange (para mostrar etiquetas tipo TradingView).
+    # `dataTimezone` declara que los timestamps de las velas SIEMPRE son UTC ms:
+    # la zona horaria solo afecta el FORMATO de las etiquetas, nunca los datos.
+    exchangeTimezone: str | None = None
+    dataTimezone: str = "UTC"
     # Velas VISIBLES del preset (las que pinta la grafica).
     bars: list[Candle] = Field(default_factory=list)
     # Velas previas SOLO para calculo de indicadores (SMA 200, etc.).

@@ -323,6 +323,20 @@ export class LightweightChartsAdapter implements ChartEngineAdapter {
         handle.canonicalChange = change;
         applyCanonicalPriceLine(handle);
       },
+      setTimeLabelFormatters: (formatters) => {
+        // LWC recibe el tiempo en segundos (UTCTimestamp). Solo formatea
+        // etiquetas: NO toca los datos de las velas.
+        handle.chart.applyOptions({
+          localization: {
+            timeFormatter: (time: unknown) =>
+              formatters.crosshair(Number(time as number)),
+          },
+          timeScale: {
+            tickMarkFormatter: (time: unknown, tickMarkType: number) =>
+              formatters.axisTick(Number(time as number), tickMarkType),
+          },
+        });
+      },
       setSimulatedEntryLines: (lines) => {
         // Quita las lineas previas (try/catch: la serie pudo recrearse al
         // cambiar el tipo de grafica y las refs viejas ya no existen).

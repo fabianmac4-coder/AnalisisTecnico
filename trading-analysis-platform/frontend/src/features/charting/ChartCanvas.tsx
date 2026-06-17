@@ -11,6 +11,8 @@ import { createFutureWhitespace, stepMsForTimeframe } from "./futureWhitespace";
 import { useSimulatedTradesStore } from "@/features/simulatedTrades/simulatedTradesStore";
 import { ChannelRiskRewardBadge } from "@/features/channelRiskReward/ChannelRiskRewardBadge";
 import { useChannelRiskRewardStore } from "@/features/channelRiskReward/channelRiskRewardStore";
+import { useChartTimezoneStore } from "@/features/charts/timezone/chartTimezoneStore";
+import { formatChartTime } from "@/features/charts/timezone/chartTimezoneUtils";
 
 /** Linea de indicador overlay sobre el precio (tiempo en segundos UTC). */
 export interface OverlayLine {
@@ -40,6 +42,8 @@ interface Props {
   canonicalChange?: number | null;
   /** Estilo del histograma de volumen (colores/opacidad del indicador global). */
   volumeStyle?: VolumeOverlayStyle;
+  /** Zona horaria del exchange (para las etiquetas de tiempo de esta gráfica). */
+  exchangeTimezone?: string | null;
 }
 
 /**
@@ -62,7 +66,9 @@ export function ChartCanvas({
   canonicalPrice = null,
   canonicalChange = null,
   volumeStyle,
+  exchangeTimezone = null,
 }: Props) {
+  const tzSetting = useChartTimezoneStore((s) => s.setting);
   const containerRef = useRef<HTMLDivElement>(null);
   const adapterRef = useRef<LightweightChartsAdapter | null>(null);
   const chartIdRef = useRef<string | null>(null);
@@ -137,6 +143,33 @@ export function ChartCanvas({
   useEffect(() => {
     instance?.setCanonicalPriceLine(canonicalPrice, canonicalChange);
   }, [instance, canonicalPrice, canonicalChange, chartType]);
+
+  // Etiquetas de tiempo (eje + crosshair) según la zona horaria elegida. Solo
+  // formato: los timestamps de las velas NO se modifican. tickMarkType de LWC:
+  // 0=Year 1=Month 2=DayOfMonth 3=Time 4=TimeWithSeconds.
+  useEffect(() => {
+    if (!instance?.setTimeLabelFormatters) return;
+    instance.setTimeLabelFormatters({
+      axisTick: (timeSec, tickMarkType) => {
+        const isTime = tickMarkType >= 3;
+        return formatChartTime({
+          timestamp: timeSec,
+          timestampUnit: "seconds",
+          setting: tzSetting,
+          exchangeTimezone,
+          includeDate: !isTime,
+          includeTime: isTime,
+        });
+      },
+      crosshair: (timeSec) =>
+        formatChartTime({
+          timestamp: timeSec,
+          timestampUnit: "seconds",
+          setting: tzSetting,
+          exchangeTimezone,
+        }),
+    });
+  }, [instance, tzSetting, exchangeTimezone, chartType]);
 
   // Marcadores de ENTRADAS SIMULADAS (paper trading): lineas punteadas al
   // precio de entrada, persistidas en SQL (C050) y visibles en los 6 charts.

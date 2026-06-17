@@ -17,6 +17,10 @@ export interface OHLCVResponse {
   priceBasis?: string;
   currency?: string | null;
   timezone?: string | null;
+  /** Zona horaria del exchange (para etiquetas tipo TradingView). */
+  exchangeTimezone?: string | null;
+  /** Zona horaria de los DATOS (siempre "UTC"; solo cambia el formato visible). */
+  dataTimezone?: string | null;
   /** Velas visibles del preset (las que pinta la grafica). */
   bars: Candle[];
   /** Velas previas SOLO para indicadores (SMA 200...); nunca se pintan. */

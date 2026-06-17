@@ -102,6 +102,21 @@ export interface ChatGptContext {
     gainLossPercent?: number | null;
     daysSinceEntry?: number;
   }>;
+  /** Planes de posición (cajas Long/Short con riesgo/beneficio) del usuario. */
+  positionPlans?: Array<{
+    type: string;
+    sourceTimeframe?: string;
+    entryPrice?: number | null;
+    targetPrice?: number | null;
+    stopPrice?: number | null;
+    quantity?: number | null;
+    riskRewardRatio?: number | null;
+    riskPercent?: number | null;
+    rewardPercent?: number | null;
+    riskAmount?: number | null;
+    rewardAmount?: number | null;
+    notes?: string | null;
+  }>;
   /** Titulares recientes del ticker (máx. 5, best-effort del backend). */
   recentNews?: Array<{
     title?: string | null;
@@ -128,6 +143,8 @@ export interface ChatGptContextToggles {
   includePriceSummary: boolean;
   includeIndicators: boolean;
   includeDrawings: boolean;
+  /** Incluir los planes de posición (cajas Long/Short con riesgo/beneficio). */
+  includePositionPlans?: boolean;
   includeWatchlistNotes: boolean;
   includeFavoriteStatus: boolean;
   includeTimeframeSummary: boolean;

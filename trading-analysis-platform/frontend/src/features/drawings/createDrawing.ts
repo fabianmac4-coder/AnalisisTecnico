@@ -4,10 +4,12 @@
 import { PRESET_KEYS } from "@/utils/timeframes";
 import {
   DEFAULT_DRAWING_STYLE,
+  isPositionTool,
   type Drawing,
   type DrawingStyle,
   type DrawingPoint,
   type DrawingType,
+  type PositionBoxData,
 } from "./drawingTypes";
 
 function uuid(): string {
@@ -26,6 +28,8 @@ export interface CreateDrawingParams {
   points: DrawingPoint[];
   color?: string;
   label?: string;
+  /** Datos extra de una caja LONG/SHORT_POSITION (cantidad, fees, notas…). */
+  position?: PositionBoxData;
 }
 
 /** Estilo por defecto segun el tipo de dibujo. */
@@ -47,6 +51,10 @@ function styleForType(type: DrawingType, color: string): DrawingStyle {
       return { ...base, width: 1, opacity: 0.25, fillOpacity: 0.12 };
     case "ellipse":
       return { ...base, width: 1, opacity: 0.35, fillOpacity: 0.1 };
+    case "LONG_POSITION":
+    case "SHORT_POSITION":
+      // Las zonas verde/roja usan colores propios; el estilo base es discreto.
+      return { ...base, width: 1, opacity: 0.9, fillOpacity: 0.12 };
     default:
       return base;
   }
@@ -55,6 +63,8 @@ function styleForType(type: DrawingType, color: string): DrawingStyle {
 export function createDrawing(params: CreateDrawingParams): Drawing {
   const now = new Date().toISOString();
   const color = params.color ?? DEFAULT_DRAWING_STYLE.color;
+  // Las cajas de posición se acotan a SU temporalidad (no son globales).
+  const isPosition = isPositionTool(params.type as never);
   return {
     id: uuid(),
     symbol: params.symbol.toUpperCase(),
@@ -67,12 +77,12 @@ export function createDrawing(params: CreateDrawingParams): Drawing {
       label: params.label,
       // El color por defecto lo gobierna la temporalidad de origen.
       usesTimeframeDefaultColor: params.color !== undefined,
+      ...(params.position ? { position: params.position } : {}),
     },
     visible: true,
     locked: false,
-    // El dibujo es global a las seis temporalidades.
-    showOnAllTimeframes: true,
-    showOnTimeframes: [...PRESET_KEYS],
+    showOnAllTimeframes: !isPosition,
+    showOnTimeframes: isPosition ? [params.sourceTimeframe] : [...PRESET_KEYS],
     createdAt: now,
     updatedAt: now,
     version: 3,

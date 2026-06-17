@@ -21,6 +21,11 @@ DrawingType = Literal[
     "trendline",
     "parallel_channel",
     "text",
+    # Cajas de planificación riesgo/recompensa (tipo TradingView). La geometría
+    # (3 puntos: entry/target/stop) va en PuntosJSON; los datos extra (cantidad,
+    # fees, notas, contexto de gráfica) en EstiloJSON.position.
+    "LONG_POSITION",
+    "SHORT_POSITION",
 ]
 # Antes era un Literal de los seis presets; ahora es libre porque los slots de
 # workspace usan contextKeys dinamicos (ej. "1Y_1h", "6M_15m").
@@ -43,6 +48,10 @@ class DrawingStyle(BaseModel):
     extendLeft: bool | None = False
     extendRight: bool | None = False
     usesTimeframeDefaultColor: bool | None = True
+    # Datos NO geométricos de las cajas de posición (LONG/SHORT): cantidad, fees,
+    # notas, moneda y contexto de la gráfica. Passthrough opaco (round-trip por
+    # EstiloJSON). None para todos los demás tipos de dibujo.
+    position: dict | None = None
 
 
 class DrawingIn(BaseModel):

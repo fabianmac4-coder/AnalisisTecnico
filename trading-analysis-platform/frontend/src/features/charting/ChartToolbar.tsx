@@ -1,6 +1,7 @@
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
 import type { ChartType } from "./chartEngine/ChartEngineAdapter";
+import { ChartTimezoneSelector } from "@/features/charts/timezone/ChartTimezoneSelector";
 
 const QUICK_TYPES: { type: ChartType; label: string }[] = [
   { type: "candlestick", label: "Velas" },
@@ -13,6 +14,15 @@ const QUICK_TYPES: { type: ChartType; label: string }[] = [
 export function ChartToolbar({ symbol }: { symbol: string }) {
   const setChartTypeAll = useChartStore((s) => s.setChartTypeAll);
   const activeTool = useDrawingStore((s) => s.activeTool);
+  // Zona horaria del exchange del símbolo activo (de cualquier slot cargado).
+  const exchangeTimezone = useChartStore((s) => {
+    for (const d of Object.values(s.chartDataBySlot)) {
+      if (d?.symbol === symbol && (d.exchangeTimezone || d.timezone)) {
+        return d.exchangeTimezone ?? d.timezone ?? null;
+      }
+    }
+    return null;
+  });
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-edge bg-panel px-3 py-1.5">
@@ -24,6 +34,7 @@ export function ChartToolbar({ symbol }: { symbol: string }) {
         </span>
       </div>
       <div className="flex items-center gap-2">
+        <ChartTimezoneSelector exchangeTimezone={exchangeTimezone} />
         <span className="text-[11px] text-muted">Aplicar a todas:</span>
         {QUICK_TYPES.map((t) => (
           <button

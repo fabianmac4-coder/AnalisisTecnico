@@ -368,6 +368,27 @@ export function buildChatGptPrompt(
     }
   }
 
+  // Planes de posición (cajas Long/Short). Por defecto se incluyen cuando hay;
+  // el toggle solo puede desactivarlos explícitamente (false).
+  const plans = context.positionPlans ?? [];
+  if (toggles.includePositionPlans !== false && plans.length > 0) {
+    lines.push("");
+    lines.push(
+      "Mis planes de posición / cajas de riesgo-beneficio (planificación hipotética, no son operaciones ejecutadas):"
+    );
+    for (const p of plans.slice(0, 10)) {
+      const kind = p.type === "LONG_POSITION" ? "Long" : "Short";
+      const rr = p.riskRewardRatio != null ? `${p.riskRewardRatio.toFixed(2)} : 1` : "n/d";
+      const tf = p.sourceTimeframe ? ` [${p.sourceTimeframe}]` : "";
+      const notes = p.notes ? ` · notas: ${p.notes}` : "";
+      lines.push(
+        `- ${kind}${tf}: entrada ${fmt(p.entryPrice)}, objetivo ${fmt(p.targetPrice)}, stop ${fmt(p.stopPrice)}` +
+          ` · cantidad ${fmt(p.quantity, 0)} · R/R ${rr}` +
+          ` · riesgo ${fmt(p.riskPercent)}% (${fmt(p.riskAmount)}), beneficio ${fmt(p.rewardPercent)}% (${fmt(p.rewardAmount)})${notes}`
+      );
+    }
+  }
+
   if (channelRR) {
     lines.push("");
     lines.push(

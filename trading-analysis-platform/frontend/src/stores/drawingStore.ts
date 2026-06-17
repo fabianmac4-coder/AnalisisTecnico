@@ -20,7 +20,7 @@ interface DrawingState {
   selectedDrawingId: string | null;
 
   loadDrawings: (symbol: string, c030Id?: number) => Promise<void>;
-  addDrawing: (drawing: Drawing) => Promise<void>;
+  addDrawing: (drawing: Drawing) => Promise<Drawing>;
   updateDrawing: (drawing: Drawing) => Promise<void>;
   removeDrawing: (id: string) => Promise<void>;
   clearForSymbol: (symbol: string) => Promise<void>;
@@ -52,6 +52,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     set({
       drawingsBySymbol: { ...get().drawingsBySymbol, [saved.symbol]: [...list, saved] },
     });
+    return saved;
   },
 
   async updateDrawing(drawing) {

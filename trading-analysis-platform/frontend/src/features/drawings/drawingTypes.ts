@@ -13,7 +13,43 @@ export type DrawingType =
   | "ray"
   | "trendline" // legado: se migra a free_line / extended_trendline
   | "parallel_channel"
-  | "text";
+  | "text"
+  // Cajas de planificación riesgo/recompensa (tipo TradingView). Geometría en
+  // points (3: entry/target/stop); datos extra en style.position. NO es una
+  // entrada simulada (C050) salvo conversión explícita.
+  | "LONG_POSITION"
+  | "SHORT_POSITION";
+
+export type PositionBoxType = "LONG_POSITION" | "SHORT_POSITION";
+
+/** Datos NO geométricos de una caja de posición (viven en style.position). */
+export interface PositionBoxData {
+  toolType: PositionBoxType;
+  quantity: number;
+  fees?: number;
+  notes?: string;
+  accountCurrency?: string;
+  chartSlotId?: string;
+  chartRange?: string;
+  chartInterval?: string;
+  chartContextKey?: string;
+}
+
+/** Cálculos derivados de una caja de posición (no se persisten). */
+export interface PositionBoxMetrics {
+  riskPerShare: number;
+  rewardPerShare: number;
+  riskAmount: number;
+  rewardAmount: number;
+  riskPercent: number;
+  rewardPercent: number;
+  riskRewardRatio: number | null;
+  targetPnL: number;
+  stopPnL: number;
+  breakEvenPrice?: number;
+  isValid: boolean;
+  validationMessage?: string;
+}
 
 export type LineStyleName = "solid" | "dashed" | "dotted";
 
@@ -30,10 +66,17 @@ export type DrawingTool =
   | "extended_trendline"
   | "rectangle"
   | "ellipse"
-  | "eraser";
+  | "eraser"
+  // Cajas de posición: se crean con UN click (entry) + target/stop/duración por
+  // defecto; luego se editan con handles/modal. NO son herramientas de 2 puntos.
+  | "LONG_POSITION"
+  | "SHORT_POSITION";
 
 /** Herramientas de dos puntos (todas crean un Drawing con 2 DrawingPoint). */
-export type TwoPointTool = Exclude<DrawingTool, "cursor" | "eraser">;
+export type TwoPointTool = Exclude<
+  DrawingTool,
+  "cursor" | "eraser" | "LONG_POSITION" | "SHORT_POSITION"
+>;
 
 export const TWO_POINT_TOOLS: readonly TwoPointTool[] = [
   "free_line",
@@ -45,6 +88,11 @@ export const TWO_POINT_TOOLS: readonly TwoPointTool[] = [
 
 export function isTwoPointTool(tool: DrawingTool): tool is TwoPointTool {
   return (TWO_POINT_TOOLS as readonly string[]).includes(tool);
+}
+
+/** Herramienta de caja de posición (creación con un click + defaults). */
+export function isPositionTool(tool: DrawingTool): tool is PositionBoxType {
+  return tool === "LONG_POSITION" || tool === "SHORT_POSITION";
 }
 
 export interface DrawingPoint {
@@ -65,6 +113,8 @@ export interface DrawingStyle {
   extendRight?: boolean;
   /** Si true, el color efectivo lo decide el color por temporalidad de origen. */
   usesTimeframeDefaultColor?: boolean;
+  /** Datos extra de las cajas LONG/SHORT_POSITION (cantidad, fees, notas…). */
+  position?: PositionBoxData;
 }
 
 export interface Drawing {
@@ -110,4 +160,7 @@ export const POINTS_REQUIRED: Record<DrawingType, number> = {
   ray: 2,
   rectangle: 2,
   parallel_channel: 3,
+  // Un click (entry); target/stop/duración se derivan por defecto.
+  LONG_POSITION: 1,
+  SHORT_POSITION: 1,
 };

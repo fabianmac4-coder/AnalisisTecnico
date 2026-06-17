@@ -303,6 +303,92 @@ def _summarize_drawing(row) -> dict:
     return out
 
 
+_POSITION_PLAN_TYPES = ("LONG_POSITION", "SHORT_POSITION")
+
+
+def _summarize_position_plan(row) -> dict | None:
+    """Resume una caja de plan de posición (Long/Short) con su riesgo/beneficio.
+
+    Geometría en PuntosJSON (3 puntos: entry/target/stop); datos extra
+    (cantidad/fees/notas) en EstiloJSON.position. Cálculos espejo del frontend
+    (`positionBoxCalculations.ts`). Devuelve None si la geometría es inválida.
+    """
+    points = _safe_json(row.PuntosJSON, [])
+    if not isinstance(points, list) or len(points) < 3:
+        return None
+    try:
+        entry = float(points[0].get("price"))
+        target = float(points[1].get("price"))
+        stop = float(points[2].get("price"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+    style = _safe_json(row.EstiloJSON, {})
+    pos = style.get("position", {}) if isinstance(style, dict) else {}
+    try:
+        quantity = float(pos.get("quantity", 1) or 1)
+    except (TypeError, ValueError):
+        quantity = 1.0
+    try:
+        fees = float(pos.get("fees", 0) or 0)
+    except (TypeError, ValueError):
+        fees = 0.0
+
+    is_long = row.TipoDibujo == "LONG_POSITION"
+    risk_per_share = (entry - stop) if is_long else (stop - entry)
+    reward_per_share = (target - entry) if is_long else (entry - target)
+    risk_amount = risk_per_share * quantity + fees
+    reward_amount = reward_per_share * quantity - fees
+    risk_pct = (risk_per_share / entry * 100) if entry else 0.0
+    reward_pct = (reward_per_share / entry * 100) if entry else 0.0
+    rr = (reward_per_share / risk_per_share) if risk_per_share > 0 else None
+
+    def _r(v: float | None, n: int = 2) -> float | None:
+        return round(v, n) if isinstance(v, (int, float)) else None
+
+    out = {
+        "type": row.TipoDibujo,
+        "sourceTimeframe": row.TemporalidadOrigen,
+        "entryPrice": _r(entry),
+        "targetPrice": _r(target),
+        "stopPrice": _r(stop),
+        "quantity": _r(quantity),
+        "fees": _r(fees),
+        "riskPerShare": _r(risk_per_share, 4),
+        "rewardPerShare": _r(reward_per_share, 4),
+        "riskAmount": _r(risk_amount),
+        "rewardAmount": _r(reward_amount),
+        "riskPercent": _r(risk_pct),
+        "rewardPercent": _r(reward_pct),
+        "riskRewardRatio": _r(rr),
+    }
+    notes = pos.get("notes")
+    if notes:
+        out["notes"] = notes
+    if row.Comentario:
+        out["comment"] = row.Comentario
+    return out
+
+
+def _position_plans(db: Session, user_id: int, c010_id: int | None) -> list[dict]:
+    """Planes de posición (Long/Short) visibles del usuario para el instrumento."""
+    if c010_id is None:
+        return []
+    try:
+        rows = DibujosRepository(db).list_by_user_and_action(user_id, c010_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Sin planes de posición para contexto: %s", type(exc).__name__)
+        return []
+    plans: list[dict] = []
+    for r in rows:
+        if not r.Visible or r.TipoDibujo not in _POSITION_PLAN_TYPES:
+            continue
+        summary = _summarize_position_plan(r)
+        if summary is not None:
+            plans.append(summary)
+    return plans
+
+
 def build_stock_context(
     db: Session,
     user_id: int,
@@ -388,6 +474,11 @@ def build_stock_context(
             }
         except Exception as exc:  # noqa: BLE001
             logger.warning("Sin dibujos para contexto: %s", type(exc).__name__)
+
+        # Planes de posición (cajas Long/Short con riesgo/beneficio).
+        plans = _position_plans(db, user_id, c010_id)
+        if plans:
+            context["positionPlans"] = plans
 
     # ===== Watchlist/catalogo (C040) =====
     if c010_id is not None:
@@ -494,6 +585,8 @@ def build_chatgpt_context(db: Session, user_id: int, symbol: str) -> dict:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Sin dibujos para contexto: %s", type(exc).__name__)
     out["drawings"] = drawings
+    # Planes de posición (cajas Long/Short con riesgo/beneficio).
+    out["positionPlans"] = _position_plans(db, user_id, c010_id)
 
     watchlist = None
     if c010_id is not None:

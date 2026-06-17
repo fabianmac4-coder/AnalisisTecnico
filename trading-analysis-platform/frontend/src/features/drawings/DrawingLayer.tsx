@@ -3,12 +3,16 @@ import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import type { ChartInstance } from "@/features/charting/chartEngine/ChartEngineAdapter";
 import { useDrawingStore } from "@/stores/drawingStore";
 import {
+  isPositionTool,
   isTwoPointTool,
   type Drawing,
   type DrawingPoint,
+  type PositionBoxType,
   type TwoPointTool,
 } from "./drawingTypes";
 import { createDrawing } from "./createDrawing";
+import { calcPositionBox, defaultPositionPrices } from "./positionBoxCalculations";
+import { usePositionBoxStore } from "./positionBoxStore";
 import {
   distancePointToSegment,
   drawingPointToLocalPoint,
@@ -65,8 +69,16 @@ const SELECT_COLOR = "#f59e0b";
 const HIT_TOLERANCE = 8;
 // Radio de agarre de los extremos (manijas) al editar con el cursor.
 const HANDLE_RADIUS_PX = 10;
-// Tipos cuyo EXTREMO se puede arrastrar individualmente (lineas).
-const ENDPOINT_EDIT_TYPES = new Set(["free_line", "dotted_line", "extended_trendline"]);
+// Tipos cuyo EXTREMO se puede arrastrar individualmente (lineas + cajas pos.).
+const ENDPOINT_EDIT_TYPES = new Set([
+  "free_line",
+  "dotted_line",
+  "extended_trendline",
+  "LONG_POSITION",
+  "SHORT_POSITION",
+]);
+// Cuántas velas a la derecha se extiende por defecto la caja de posición.
+const POSITION_DEFAULT_BARS = 12;
 // Radio del "pincel" de la goma. 6 px: comodo pero sin borrar lineas vecinas.
 const DEFAULT_ERASER_RADIUS_PX = 6;
 const DEV = import.meta.env.DEV;
@@ -112,6 +124,8 @@ export function DrawingLayer({
   const removeDrawing = useDrawingStore((s) => s.removeDrawing);
   const selectDrawing = useDrawingStore((s) => s.selectDrawing);
   const selectedDrawingId = useDrawingStore((s) => s.selectedDrawingId);
+  const setActiveTool = useDrawingStore((s) => s.setActiveTool);
+  const openPositionEdit = usePositionBoxStore((s) => s.openEdit);
 
   const [interaction, setInteraction] = useState<Interaction>({ mode: "idle" });
   const interactionRef = useRef<Interaction>(interaction);
@@ -153,11 +167,14 @@ export function DrawingLayer({
   const isDrawingActive = editable && isTwoPointTool(activeTool);
   const isEraser = editable && activeTool === "eraser";
   const isCursor = editable && activeTool === "cursor";
+  // Cajas de posición: se crean con UN click + defaults (no son de 2 puntos).
+  const isPositionToolActive = editable && isPositionTool(activeTool);
   // Con el cursor y un dibujo seleccionado, el overlay captura punteros para
   // poder ARRASTRAR la linea o sus extremos (pan/zoom se pausa mientras).
   const isEditMode = isCursor && selectedDrawingId != null;
-  // El overlay captura punteros al dibujar, al borrar y al editar.
-  const overlayInteractive = isDrawingActive || isEraser || isEditMode;
+  // El overlay captura punteros al dibujar, al borrar, al editar y al crear cajas.
+  const overlayInteractive =
+    isDrawingActive || isEraser || isEditMode || isPositionToolActive;
 
   // Sincroniza la maquina de estados con la herramienta activa.
   useEffect(() => {
@@ -273,6 +290,39 @@ export function DrawingLayer({
     [symbol, c030Id, sourceTimeframe, addDrawing, timeframeColors]
   );
 
+  // Crea una caja de posición con UN click (entry) + target/stop/duración por
+  // defecto; queda seleccionada y se vuelve al cursor para editar.
+  const createPositionBoxAt = useCallback(
+    async (tool: PositionBoxType, entry: DrawingPoint) => {
+      const { targetPrice, stopPrice } = defaultPositionPrices(tool, entry.price);
+      const stepMs = futureInfo?.stepMs ?? 24 * 3600 * 1000;
+      const endTime = entry.time + POSITION_DEFAULT_BARS * stepMs;
+      const points: DrawingPoint[] = [
+        { time: entry.time, price: entry.price },
+        { time: endTime, price: targetPrice },
+        { time: endTime, price: stopPrice },
+      ];
+      const drawing = createDrawing({
+        symbol,
+        c030Id,
+        sourceTimeframe,
+        type: tool,
+        points,
+        position: {
+          toolType: tool,
+          quantity: 1,
+          fees: 0,
+          accountCurrency: "USD",
+          chartContextKey: sourceTimeframe,
+        },
+      });
+      const saved = await addDrawing(drawing);
+      setActiveTool("cursor");
+      selectDrawing(saved.id);
+    },
+    [symbol, c030Id, sourceTimeframe, futureInfo, addDrawing, setActiveTool, selectDrawing]
+  );
+
   const localToDrawing = (e: React.PointerEvent): { local: LocalPoint; dp: DrawingPoint | null } => {
     const svg = svgRef.current;
     if (!svg || !chart || !mainSeries) return { local: { x: 0, y: 0 }, dp: null };
@@ -343,6 +393,13 @@ export function DrawingLayer({
       // 3) Click fuera: re-selecciona otro dibujo o deselecciona.
       const hit = findHitDrawing(local);
       selectDrawing(hit ? hit.id : null);
+      return;
+    }
+
+    // Herramienta de caja de posición: un click crea la caja con defaults.
+    if (isPositionToolActive) {
+      const { dp } = localToDrawing(e);
+      if (dp) void createPositionBoxAt(activeTool as PositionBoxType, dp);
       return;
     }
 
@@ -454,6 +511,25 @@ export function DrawingLayer({
     if (dragRef.current) finishDrag(e, false);
   };
 
+  // Doble click sobre una caja de posición -> abre el modal de edición.
+  const onDoubleClick = (e: React.MouseEvent) => {
+    if (!isCursor || !chart || !mainSeries) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const local = pointerEventToLocalPoint(e, svg);
+    const range = instance?.getVisibleTimeRangeMs() ?? null;
+    const box = drawings.find(
+      (d) =>
+        (d.type === "LONG_POSITION" || d.type === "SHORT_POSITION") &&
+        d.visible &&
+        hitTest(d, local, chart, mainSeries, size, range, HIT_TOLERANCE, convCtx)
+    );
+    if (box) {
+      selectDrawing(box.id);
+      openPositionEdit(box.id);
+    }
+  };
+
   const onPointerLeave = () => {
     if (isEraser) setEraserPos(null);
   };
@@ -558,6 +634,7 @@ export function DrawingLayer({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onDoubleClick={onDoubleClick}
         onPointerCancel={onPointerCancel}
         onPointerLeave={onPointerLeave}
         onContextMenu={onContextMenu}
@@ -755,6 +832,23 @@ interface RenderOpts {
   ctx: ConvCtx;
 }
 
+/** Coordenadas de pixel de una caja de posición (3 puntos: entry/target/stop). */
+function positionBoxLocal(
+  d: Drawing,
+  chart: IChartApi,
+  mainSeries: MainSeries,
+  ctx: ConvCtx
+): { entry: LocalPoint; target: LocalPoint; stop: LocalPoint; x0: number; x1: number } | null {
+  if (d.points.length < 3) return null;
+  const entry = toLocal(d.points[0], chart, mainSeries, ctx);
+  const target = toLocal(d.points[1], chart, mainSeries, ctx);
+  const stop = toLocal(d.points[2], chart, mainSeries, ctx);
+  if (!entry || !target || !stop) return null;
+  const x0 = Math.min(entry.x, target.x, stop.x);
+  const x1 = Math.max(entry.x, target.x, stop.x, x0 + 40);
+  return { entry, target, stop, x0, x1 };
+}
+
 function renderDrawing(
   d: Drawing,
   chart: IChartApi,
@@ -878,6 +972,67 @@ function renderDrawing(
         </g>
       );
     }
+    case "LONG_POSITION":
+    case "SHORT_POSITION": {
+      const pb = positionBoxLocal(d, chart, mainSeries, opts.ctx);
+      if (!pb) {
+        debugSkip(d, "robust_time_coordinate_null");
+        return null;
+      }
+      const { entry, target, stop, x0, x1 } = pb;
+      const w = Math.max(2, x1 - x0);
+      const pos = d.style.position;
+      const qty = pos?.quantity ?? 1;
+      const m = calcPositionBox({
+        type: d.type as PositionBoxType,
+        entryPrice: d.points[0].price,
+        targetPrice: d.points[1].price,
+        stopPrice: d.points[2].price,
+        quantity: qty,
+        fees: pos?.fees ?? 0,
+      });
+      const GREEN = "#22c55e";
+      const RED = "#ef4444";
+      const ENTRY = selected ? SELECT_COLOR : "#93c5fd";
+      const rr = m.riskRewardRatio != null ? m.riskRewardRatio.toFixed(2) : "—";
+      const isLong = d.type === "LONG_POSITION";
+      return (
+        <g key={d.id}>
+          {/* Zona de RECOMPENSA (verde): entry -> target */}
+          <rect
+            x={x0} y={Math.min(entry.y, target.y)} width={w}
+            height={Math.abs(target.y - entry.y)}
+            fill={GREEN} fillOpacity={0.12} stroke={GREEN} strokeOpacity={0.45} strokeWidth={1}
+          />
+          {/* Zona de RIESGO (rojo): entry -> stop */}
+          <rect
+            x={x0} y={Math.min(entry.y, stop.y)} width={w}
+            height={Math.abs(stop.y - entry.y)}
+            fill={RED} fillOpacity={0.12} stroke={RED} strokeOpacity={0.45} strokeWidth={1}
+          />
+          {/* Línea de entrada */}
+          <line x1={x0} y1={entry.y} x2={x1} y2={entry.y} stroke={ENTRY} strokeWidth={width + 0.5} />
+          {/* Etiqueta principal */}
+          <text x={x0 + 4} y={entry.y - 4} fill={ENTRY} fontSize={9} fontWeight="bold">
+            {isLong ? "Long" : "Short"} {d.points[0].price.toFixed(2)} · Qty {qty} · R/R {rr}
+          </text>
+          {/* Etiqueta objetivo (recompensa) */}
+          <text x={x0 + 4} y={Math.min(entry.y, target.y) + 10} fill={GREEN} fontSize={9}>
+            TP {d.points[1].price.toFixed(2)} · +{Math.abs(m.rewardPercent).toFixed(1)}% · {m.rewardAmount.toFixed(0)}
+          </text>
+          {/* Etiqueta stop (riesgo) */}
+          <text x={x0 + 4} y={Math.max(entry.y, stop.y) - 3} fill={RED} fontSize={9}>
+            SL {d.points[2].price.toFixed(2)} · -{Math.abs(m.riskPercent).toFixed(1)}% · {m.riskAmount.toFixed(0)}
+          </text>
+          {!m.isValid && (
+            <text x={x0 + 4} y={entry.y + 22} fill="#f59e0b" fontSize={8}>
+              ⚠ {m.validationMessage}
+            </text>
+          )}
+          {rawHandles([d.points[0], d.points[1], d.points[2]])}
+        </g>
+      );
+    }
     default:
       return null;
   }
@@ -984,6 +1139,19 @@ function hitTest(
       const nx = (cursor.x - cx) / rx;
       const ny = (cursor.y - cy) / ry;
       return nx * nx + ny * ny <= 1;
+    }
+    case "LONG_POSITION":
+    case "SHORT_POSITION": {
+      const pb = positionBoxLocal(d, chart, mainSeries, ctx);
+      if (!pb) return false;
+      const yTop = Math.min(pb.target.y, pb.stop.y, pb.entry.y);
+      const yBot = Math.max(pb.target.y, pb.stop.y, pb.entry.y);
+      return (
+        cursor.x >= pb.x0 - tolerance &&
+        cursor.x <= pb.x1 + tolerance &&
+        cursor.y >= yTop - tolerance &&
+        cursor.y <= yBot + tolerance
+      );
     }
     default:
       void size;

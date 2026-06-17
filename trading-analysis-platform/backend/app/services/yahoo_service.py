@@ -321,6 +321,8 @@ def get_ohlcv(
         priceBasis=PRICE_BASIS,
         currency=currency,
         timezone=tz,
+        exchangeTimezone=tz,
+        dataTimezone="UTC",
         bars=bars,
         warmupBars=warmup,
         visibleFrom=visible_from_ms if visible_from_ms is not None else bars[0].time,
@@ -472,6 +474,8 @@ def get_candles(
         priceBasis=PRICE_BASIS,
         currency=currency,
         timezone=tz,
+        exchangeTimezone=tz,
+        dataTimezone="UTC",
         bars=bars,
         warmupBars=warmup,
         visibleFrom=visible_from_ms if visible_from_ms is not None else bars[0].time,
@@ -576,17 +580,39 @@ def _last_close_from_history(ticker: Any) -> float | None:
     return None
 
 
+def _us_equity_default_tz(symbol: str) -> str | None:
+    """Default conservador: ticker alfanumérico simple de EE.UU. -> NY.
+
+    Evita índices (^), FX (=X), cripto (-USD) y tickers con sufijo de región
+    (`.MX`, `.L`), para no asignar mal la zona horaria.
+    """
+    s = symbol.strip().upper()
+    if not s or "^" in s or "=" in s or "-" in s or "." in s:
+        return None
+    if s.isalnum():
+        return "America/New_York"
+    return None
+
+
 def _resolve_meta(symbol: str) -> tuple[str | None, str | None]:
-    """Obtiene currency y timezone de forma tolerante a fallos."""
+    """Obtiene currency y exchangeTimezone, tolerante a fallos.
+
+    Cadena de respaldo de la zona horaria: Yahoo fast_info -> default de equity
+    de EE.UU. -> None (el frontend cae a la hora local del navegador).
+    """
+    tz: str | None = None
+    currency: str | None = None
     try:
         import yfinance as yf
 
         info = yf.Ticker(symbol).fast_info
         currency = getattr(info, "currency", None)
         tz = getattr(info, "timezone", None)
-        return currency, tz
     except Exception:  # noqa: BLE001 - meta es opcional
-        return None, None
+        pass
+    if not tz:
+        tz = _us_equity_default_tz(symbol)
+    return currency, tz
 
 
 def get_fundamentals(symbol: str, force_refresh: bool = False) -> dict:

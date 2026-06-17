@@ -2,6 +2,7 @@ import { SymbolCatalog } from "@/features/symbols/SymbolCatalog";
 import { SimulatedTradesPanel } from "@/features/simulatedTrades/SimulatedTradesPanel";
 import { SimulatedTradeModal } from "@/features/simulatedTrades/SimulatedTradeModal";
 import { SimulatedTradeDetailModal } from "@/features/simulatedTrades/SimulatedTradeDetailModal";
+import { PositionBoxModal } from "@/features/drawings/PositionBoxModal";
 import { ChannelRiskRewardPanel } from "@/features/channelRiskReward/ChannelRiskRewardPanel";
 import { SymbolNewsPanel } from "@/features/news/SymbolNewsPanel";
 import { StockScorecard } from "@/features/stockScorecard/StockScorecard";
@@ -29,6 +30,7 @@ export function Sidebar() {
       </div>
       <SimulatedTradeModal />
       <SimulatedTradeDetailModal />
+      <PositionBoxModal />
     </aside>
   );
 }

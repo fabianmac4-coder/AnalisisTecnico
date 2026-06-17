@@ -673,6 +673,68 @@ tenencias con cantidad y costo). Informativo, **no es asesoría financiera**.
   resultado (con confianza) viaja a los prompts de IA. Hipotético, no
   asesoría financiera.
 
+### Zona horaria de las gráficas
+
+Selector **Zona horaria** en la barra superior del dashboard (junto a "Aplicar a
+todas"). Cambia **solo cómo se muestran las horas** en las gráficas; **nunca**
+modifica las marcas de tiempo de las velas (los datos OHLCV siguen siendo crudos
+y se transportan en **Unix ms UTC**; la conversión es de pura presentación).
+
+- **Modos**: Exchange (zona del mercado del instrumento), Local (zona del
+  navegador), UTC, **offsets fijos UTC-12 … UTC+14** y presets IANA
+  (America/New_York, America/Chicago, America/Denver, America/Los_Angeles,
+  America/Mexico_City, Europe/London, Europe/Berlin, Asia/Tokyo, Asia/Hong_Kong).
+- **Por defecto**: Exchange si el backend conoce la zona del mercado; si no,
+  Local. La preferencia persiste por navegador en `localStorage`
+  (`tradingPlatform.chartTimezoneMode` / `tradingPlatform.chartTimezoneValue`).
+- **Qué afecta**: marcas del eje de tiempo y el tooltip del crosshair (vía el
+  formateador del adaptador de Lightweight Charts). Los offsets fijos desplazan
+  el instante solo para mostrarlo (no mutan la vela). Cambiar la zona **no**
+  recarga datos de mercado: solo re-formatea las etiquetas.
+- **Backend**: la respuesta de mercado incluye campos **opcionales aditivos**
+  `exchangeTimezone` (de `C010.TimezoneMercado` → metadata de Yahoo →
+  `America/New_York` para equities de EE. UU. → `UTC`) y `dataTimezone: "UTC"`.
+  Los contratos antiguos siguen funcionando (el campo `timezone` se mantiene).
+
+### Planes de posición Long / Short (cajas de riesgo-beneficio)
+
+Herramientas **Posición Long** (L▲) y **Posición Short** (S▼) en la toolbar de
+dibujo (debajo de la goma). Dibujan una **caja editable verde/roja** estilo
+TradingView para **planificar** una operación: entrada, stop loss, take profit,
+riesgo, recompensa, cantidad, P&L y ratio R/R. Es una herramienta de
+**planificación/análisis**, **separada de las Entradas simuladas** (paper
+trading): un plan no ejecuta nada ni crea una entrada salvo conversión explícita.
+
+- **Crear**: elige la herramienta y **haz un clic** en la gráfica (la entrada).
+  El objetivo y el stop se crean con defaults (Long: objetivo +5 %, stop −3 %;
+  Short: objetivo −5 %, stop +3 %) y la caja se extiende varias velas a la
+  derecha. Queda seleccionada para editarla.
+- **Visual**: línea de entrada en medio, **zona de recompensa verde** (entrada→
+  objetivo) y **zona de riesgo roja** (entrada→stop), con etiquetas de objetivo
+  (TP, % y $), stop (SL, % y $) y la etiqueta principal (Long/Short, entrada,
+  cantidad y R/R). En Long el verde va por encima de la entrada; en Short, por
+  debajo. Se dibuja sobre el overlay SVG propio (no usa primitivas de la
+  librería de gráficas).
+- **Editar**: arrastra las manijas de los tres niveles (entrada/objetivo/stop) o
+  **doble clic** para abrir el modal con tipo, entrada, objetivo, stop, cantidad,
+  fees y notas, con **cálculo en vivo** de riesgo/recompensa (%, $, P&L y ratio).
+  Botones: Guardar, Eliminar, Bloquear/Desbloquear y **Crear entrada simulada**
+  (conversión opcional a `C050` que **no** borra el plan). La geometría inválida
+  muestra un aviso, nunca rompe.
+- **Cálculos** (`positionBoxCalculations.ts`, función pura): Long
+  `riesgo=entrada−stop`, `recompensa=objetivo−entrada`; Short `riesgo=stop−
+  entrada`, `recompensa=entrada−objetivo`. Las fees suman al riesgo y restan a la
+  recompensa. Guarda contra división por cero, precios ≤ 0 y cantidad ≤ 0.
+- **Persistencia y aislamiento**: se guardan como **dibujos** en `dbo.C0101`
+  (`TipoDibujo` `LONG_POSITION`/`SHORT_POSITION`; geometría en `PuntosJSON`,
+  datos extra —cantidad/fees/notas— en `EstiloJSON.position`), acotados por
+  **usuario + acción + workspace + temporalidad**. Una caja creada en una
+  temporalidad/workspace **no** aparece en otra ni se filtra entre usuarios.
+- **Integración con IA**: el AI Chat y el prompt de ChatGPT (toggle *Planes de
+  posición*) incluyen un resumen `positionPlans` (entrada/objetivo/stop, R/R,
+  riesgo %/$, recompensa %/$, notas) acotado al usuario/acción/workspace. La IA
+  usa lenguaje de escenarios; **no es asesoría financiera**.
+
 ### Refresh manual y auto-refresh
 
 - **⟳ Refresh** (header): recarga el ticker activo con datos frescos de Yahoo

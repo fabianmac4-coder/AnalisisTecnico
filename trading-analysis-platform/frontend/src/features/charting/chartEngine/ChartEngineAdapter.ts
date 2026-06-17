@@ -82,6 +82,16 @@ export interface ChartInstance {
       title?: string | null;
     }>
   ): void;
+  /**
+   * Aplica un formateador de etiquetas de tiempo (eje + crosshair) según la zona
+   * horaria elegida. Recibe formatters que convierten un timestamp en SEGUNDOS
+   * (el que usa LWC) a string. NO muta los datos. Opcional para no romper
+   * ChartInstance falsos en tests.
+   */
+  setTimeLabelFormatters?(formatters: {
+    axisTick: (timeSec: number, tickMarkType: number) => string;
+    crosshair: (timeSec: number) => string;
+  }): void;
 }
 
 export interface ChartEngineAdapter {

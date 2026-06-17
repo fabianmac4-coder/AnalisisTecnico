@@ -41,6 +41,23 @@ const TOOLS: { tool: DrawingTool; label: string; icon: ReactNode }[] = [
   },
 ];
 
+// Herramientas de PLAN de posición (riesgo/beneficio). Separadas visualmente de
+// las herramientas de dibujo y de las Entradas simuladas (C050).
+const POSITION_TOOLS: { tool: DrawingTool; label: string; icon: ReactNode }[] = [
+  {
+    tool: "LONG_POSITION",
+    label:
+      "Plan de posición Long: planifica una compra con entrada, stop loss, objetivo y riesgo/beneficio (no es una entrada simulada)",
+    icon: <span className="text-[11px] font-bold text-emerald-400">L▲</span>,
+  },
+  {
+    tool: "SHORT_POSITION",
+    label:
+      "Plan de posición Short: planifica una venta en corto con entrada, stop loss, objetivo y riesgo/beneficio (no es una entrada simulada)",
+    icon: <span className="text-[11px] font-bold text-rose-400">S▼</span>,
+  },
+];
+
 /** Paleta vertical de herramientas de dibujo + acciones. */
 export function DrawingToolbar() {
   const activeTool = useDrawingStore((s) => s.activeTool);
@@ -60,6 +77,19 @@ export function DrawingToolbar() {
   return (
     <div className="flex w-12 flex-col items-center gap-1 border-r border-edge bg-panel py-2">
       {TOOLS.map((t) => (
+        <IconButton
+          key={t.tool}
+          title={t.label}
+          active={activeTool === t.tool}
+          onClick={() => setActiveTool(t.tool)}
+        >
+          {t.icon}
+        </IconButton>
+      ))}
+
+      <div className="my-1 h-px w-6 bg-edge" />
+
+      {POSITION_TOOLS.map((t) => (
         <IconButton
           key={t.tool}
           title={t.label}

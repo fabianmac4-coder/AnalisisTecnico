@@ -206,6 +206,7 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
             canonicalPrice={displayPrice}
             canonicalChange={quote?.change ?? null}
             volumeStyle={volumeStyle}
+            exchangeTimezone={data?.exchangeTimezone ?? data?.timezone}
           />
         )}
       </div>

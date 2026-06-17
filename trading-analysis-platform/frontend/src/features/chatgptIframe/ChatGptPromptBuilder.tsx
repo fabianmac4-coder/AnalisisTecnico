@@ -6,6 +6,7 @@ const TOGGLES: Array<{
     | "includePriceSummary"
     | "includeIndicators"
     | "includeDrawings"
+    | "includePositionPlans"
     | "includeWatchlistNotes"
     | "includeFavoriteStatus"
     | "includeTimeframeSummary"
@@ -19,6 +20,7 @@ const TOGGLES: Array<{
   { key: "includePriceSummary", label: "Precio" },
   { key: "includeIndicators", label: "Indicadores" },
   { key: "includeDrawings", label: "Dibujos" },
+  { key: "includePositionPlans", label: "Planes de posición" },
   { key: "includeWatchlistNotes", label: "Notas" },
   { key: "includeFavoriteStatus", label: "Favorito" },
   { key: "includeTimeframeSummary", label: "Temporalidades" },
