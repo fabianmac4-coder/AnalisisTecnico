@@ -95,6 +95,11 @@ export function isPositionTool(tool: DrawingTool): tool is PositionBoxType {
   return tool === "LONG_POSITION" || tool === "SHORT_POSITION";
 }
 
+/** Tipo de dibujo = caja de posición (Long/Short). */
+export function isPositionType(type: DrawingType): type is PositionBoxType {
+  return type === "LONG_POSITION" || type === "SHORT_POSITION";
+}
+
 export interface DrawingPoint {
   /** Unix milliseconds UTC. */
   time: number;

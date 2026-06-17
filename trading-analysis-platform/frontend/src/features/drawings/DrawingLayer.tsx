@@ -4,6 +4,7 @@ import type { ChartInstance } from "@/features/charting/chartEngine/ChartEngineA
 import { useDrawingStore } from "@/stores/drawingStore";
 import {
   isPositionTool,
+  isPositionType,
   isTwoPointTool,
   type Drawing,
   type DrawingPoint,
@@ -12,7 +13,10 @@ import {
 } from "./drawingTypes";
 import { createDrawing } from "./createDrawing";
 import { calcPositionBox, defaultPositionPrices } from "./positionBoxCalculations";
+import { dragPositionBoxPoints, resizePositionBoxRightEdge } from "./positionBoxGeometry";
 import { usePositionBoxStore } from "./positionBoxStore";
+import { showToast } from "@/components/ui/toastStore";
+import { ApiError } from "@/services/apiClient";
 import {
   distancePointToSegment,
   drawingPointToLocalPoint,
@@ -79,6 +83,8 @@ const ENDPOINT_EDIT_TYPES = new Set([
 ]);
 // Cuántas velas a la derecha se extiende por defecto la caja de posición.
 const POSITION_DEFAULT_BARS = 12;
+// Ancho en píxeles de la caja cuando su endTime cae en el futuro no proyectable.
+const POSITION_DEFAULT_WIDTH_PX = 120;
 // Radio del "pincel" de la goma. 6 px: comodo pero sin borrar lineas vecinas.
 const DEFAULT_ERASER_RADIUS_PX = 6;
 const DEV = import.meta.env.DEV;
@@ -144,7 +150,9 @@ export function DrawingLayer({
     | null
     | {
         drawingId: string;
-        mode: "body" | "endpoint";
+        // body = mover todo; endpoint = una manija de precio; position_resize =
+        // borde derecho de una caja de posición (cambia endTime, no los precios).
+        mode: "body" | "endpoint" | "position_resize";
         endpointIndex: number;
         startDp: DrawingPoint;
         originalPoints: DrawingPoint[];
@@ -191,6 +199,29 @@ export function DrawingLayer({
     instance.setInteractionEnabled(!overlayInteractive);
     return () => instance.setInteractionEnabled(true);
   }, [instance, overlayInteractive]);
+
+  // DIAGNÓSTICO (solo DEV): confirma que ESTA capa recibe la herramienta de
+  // posición activa y que el overlay quedó interactivo. Si al seleccionar
+  // "Posición Long/Short" no aparece este log, el problema está antes (toolbar
+  // o store); si aparece pero el click no crea nada, el problema es el puntero.
+  useEffect(() => {
+    if (!DEV || !isPositionToolActive) return;
+    // eslint-disable-next-line no-console
+    console.debug("[PositionTool] drawing layer state", {
+      sourceTimeframe,
+      symbol,
+      c030Id,
+      activeTool,
+      editable,
+      isPositionToolActive,
+      overlayInteractive,
+      hasInstance: !!instance,
+      drawingCount: drawings.length,
+    });
+  }, [
+    isPositionToolActive, overlayInteractive, instance, activeTool, editable,
+    sourceTimeframe, symbol, c030Id, drawings.length,
+  ]);
 
   // Repinta el overlay en cambios de viewport y de tamaño.
   useEffect(() => {
@@ -316,9 +347,40 @@ export function DrawingLayer({
           chartContextKey: sourceTimeframe,
         },
       });
-      const saved = await addDrawing(drawing);
-      setActiveTool("cursor");
-      selectDrawing(saved.id);
+      if (DEV) {
+        // eslint-disable-next-line no-console
+        console.debug("[PositionTool] create payload", {
+          tool, c030Id, sourceTimeframe, entry, points,
+        });
+      }
+      try {
+        const saved = await addDrawing(drawing);
+        if (DEV) {
+          // eslint-disable-next-line no-console
+          console.debug("[PositionTool] save result", {
+            id: saved.id, type: saved.type, c030Id: saved.c030Id,
+            sourceTimeframe: saved.sourceTimeframe, points: saved.points.length,
+          });
+        }
+        setActiveTool("cursor");
+        selectDrawing(saved.id);
+      } catch (err) {
+        // No fallar en silencio: el usuario debe saber que no se guardó, y en
+        // DEV mostramos la causa REAL (status + detalle) para diagnosticar.
+        const status = err instanceof ApiError ? err.status : undefined;
+        const detail =
+          err instanceof ApiError
+            ? `(${err.status}) ${err.message}`
+            : (err as Error)?.message ?? "error desconocido";
+        // eslint-disable-next-line no-console
+        if (DEV) console.error("[PositionTool] save FAILED", { status, detail, err });
+        showToast(
+          DEV
+            ? `No se pudo crear el plan de posición — ${detail}`
+            : "No se pudo crear el plan de posición.",
+          "error"
+        );
+      }
     },
     [symbol, c030Id, sourceTimeframe, futureInfo, addDrawing, setActiveTool, selectDrawing]
   );
@@ -359,35 +421,58 @@ export function DrawingLayer({
       const { local, dp } = localToDrawing(e);
       const selected = drawings.find((d) => d.id === selectedDrawingId) ?? null;
       if (selected && !selected.locked && dp && chart && mainSeries) {
-        // 1) ¿Agarro un EXTREMO de la linea seleccionada?
-        if (ENDPOINT_EDIT_TYPES.has(selected.type)) {
-          for (let i = 0; i < selected.points.length; i++) {
-            const lp = drawingPointToLocalPointRobust(
-              selected.points[i], chart, mainSeries, convCtx.bars, convCtx.future
-            );
-            if (lp && Math.hypot(local.x - lp.x, local.y - lp.y) <= HANDLE_RADIUS_PX) {
-              dragRef.current = {
-                drawingId: selected.id,
-                mode: "endpoint",
-                endpointIndex: i,
-                startDp: dp,
-                originalPoints: selected.points.map((p) => ({ ...p })),
-              };
-              return;
-            }
-          }
-        }
-        // 2) ¿Agarro el CUERPO? (mueve la linea completa conservando pendiente)
-        const range = instance?.getVisibleTimeRangeMs() ?? null;
-        if (hitTest(selected, local, chart, mainSeries, size, range, HIT_TOLERANCE, convCtx)) {
+        const startDrag = (mode: "body" | "endpoint" | "position_resize", idx: number) => {
           dragRef.current = {
             drawingId: selected.id,
-            mode: "body",
-            endpointIndex: -1,
+            mode,
+            endpointIndex: idx,
             startDp: dp,
             originalPoints: selected.points.map((p) => ({ ...p })),
           };
-          return;
+        };
+        const range = instance?.getVisibleTimeRangeMs() ?? null;
+
+        if (isPositionType(selected.type)) {
+          // Caja de posición: manijas de PRECIO (esquinas), BORDE DERECHO (resize
+          // horizontal de endTime) y, si no, CUERPO (mover en tiempo + precio).
+          const pb = positionBoxLocal(selected, chart, mainSeries, convCtx);
+          if (pb) {
+            const near = (hx: number, hy: number) =>
+              Math.hypot(local.x - hx, local.y - hy) <= HANDLE_RADIUS_PX;
+            // Manijas de precio (entry/target/stop) en sus líneas.
+            if (near(pb.x1, pb.target.y)) return startDrag("endpoint", 1);
+            if (near(pb.x1, pb.stop.y)) return startDrag("endpoint", 2);
+            if (near(pb.x0, pb.entry.y)) return startDrag("endpoint", 0);
+            // Borde derecho (manija central o cualquier punto del borde vertical).
+            const yTop = Math.min(pb.target.y, pb.stop.y);
+            const yBot = Math.max(pb.target.y, pb.stop.y);
+            const onRightEdge =
+              Math.abs(local.x - pb.x1) <= HIT_TOLERANCE &&
+              local.y >= yTop - HIT_TOLERANCE &&
+              local.y <= yBot + HIT_TOLERANCE;
+            if (near(pb.x1, pb.entry.y) || onRightEdge) {
+              return startDrag("position_resize", -1);
+            }
+          }
+          if (hitTest(selected, local, chart, mainSeries, size, range, HIT_TOLERANCE, convCtx)) {
+            return startDrag("body", -1);
+          }
+        } else {
+          // 1) ¿Agarro un EXTREMO de la linea seleccionada?
+          if (ENDPOINT_EDIT_TYPES.has(selected.type)) {
+            for (let i = 0; i < selected.points.length; i++) {
+              const lp = drawingPointToLocalPointRobust(
+                selected.points[i], chart, mainSeries, convCtx.bars, convCtx.future
+              );
+              if (lp && Math.hypot(local.x - lp.x, local.y - lp.y) <= HANDLE_RADIUS_PX) {
+                return startDrag("endpoint", i);
+              }
+            }
+          }
+          // 2) ¿Agarro el CUERPO? (mueve la linea completa conservando pendiente)
+          if (hitTest(selected, local, chart, mainSeries, size, range, HIT_TOLERANCE, convCtx)) {
+            return startDrag("body", -1);
+          }
         }
       }
       // 3) Click fuera: re-selecciona otro dibujo o deselecciona.
@@ -398,8 +483,22 @@ export function DrawingLayer({
 
     // Herramienta de caja de posición: un click crea la caja con defaults.
     if (isPositionToolActive) {
-      const { dp } = localToDrawing(e);
-      if (dp) void createPositionBoxAt(activeTool as PositionBoxType, dp);
+      const { local, dp } = localToDrawing(e);
+      if (DEV) {
+        // eslint-disable-next-line no-console
+        console.debug("[PositionTool] pointer received + coordinates", {
+          activeTool, clientX: e.clientX, clientY: e.clientY,
+          localX: local.x, localY: local.y,
+          time: dp?.time ?? null, price: dp?.price ?? null,
+          hasChart: !!chart, hasMainSeries: !!mainSeries,
+        });
+      }
+      if (dp) {
+        void createPositionBoxAt(activeTool as PositionBoxType, dp);
+      } else if (DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[PositionTool] coordinateToTime/Price returned null; box NOT created");
+      }
       return;
     }
 
@@ -456,10 +555,35 @@ export function DrawingLayer({
             price: p.price + dPrice,
           })),
         });
+      } else if (drag.mode === "position_resize") {
+        // Borde derecho: cambia SOLO endTime (target y stop), no los precios.
+        setDraft({
+          id: drag.drawingId,
+          points: resizePositionBoxRightEdge({
+            original: drag.originalPoints,
+            newEndTime: dp.time,
+            minStepMs: futureInfo?.stepMs ?? 1,
+          }),
+        });
       } else {
-        const points = drag.originalPoints.map((p) => ({ ...p }));
-        points[drag.endpointIndex] = dp;
-        setDraft({ id: drag.drawingId, points });
+        const dragged = drawings.find((d) => d.id === drag.drawingId);
+        if (dragged && isPositionType(dragged.type)) {
+          // Caja de posición: la manija conoce su ROL (entry/target/stop) y
+          // recalcula los 3 puntos como un objeto coherente (sin desconectarse).
+          setDraft({
+            id: drag.drawingId,
+            points: dragPositionBoxPoints({
+              type: dragged.type as PositionBoxType,
+              original: drag.originalPoints,
+              handleIndex: drag.endpointIndex,
+              pointerPrice: dp.price,
+            }),
+          });
+        } else {
+          const points = drag.originalPoints.map((p) => ({ ...p }));
+          points[drag.endpointIndex] = dp;
+          setDraft({ id: drag.drawingId, points });
+        }
       }
       return;
     }
@@ -832,7 +956,16 @@ interface RenderOpts {
   ctx: ConvCtx;
 }
 
-/** Coordenadas de pixel de una caja de posición (3 puntos: entry/target/stop). */
+/**
+ * Coordenadas de pixel de una caja de posición (3 puntos: entry/target/stop).
+ *
+ * ROBUSTO: el PRECIO (y) siempre se proyecta con priceToCoordinate (continuo);
+ * la x de la ENTRADA (borde izquierdo) usa la conversión robusta de tiempo. La x
+ * del borde DERECHO es el `endTime` de la caja, que suele caer en el FUTURO más
+ * allá del whitespace y entonces no es proyectable: en ese caso se usa un ancho
+ * por defecto en píxeles. Así la caja se dibuja aunque el objetivo/stop estén en
+ * el futuro lejano o fuera del rango de precio visible.
+ */
 function positionBoxLocal(
   d: Drawing,
   chart: IChartApi,
@@ -840,13 +973,29 @@ function positionBoxLocal(
   ctx: ConvCtx
 ): { entry: LocalPoint; target: LocalPoint; stop: LocalPoint; x0: number; x1: number } | null {
   if (d.points.length < 3) return null;
-  const entry = toLocal(d.points[0], chart, mainSeries, ctx);
-  const target = toLocal(d.points[1], chart, mainSeries, ctx);
-  const stop = toLocal(d.points[2], chart, mainSeries, ctx);
-  if (!entry || !target || !stop) return null;
-  const x0 = Math.min(entry.x, target.x, stop.x);
-  const x1 = Math.max(entry.x, target.x, stop.x, x0 + 40);
-  return { entry, target, stop, x0, x1 };
+  const entryY = mainSeries.priceToCoordinate(d.points[0].price);
+  const targetY = mainSeries.priceToCoordinate(d.points[1].price);
+  const stopY = mainSeries.priceToCoordinate(d.points[2].price);
+  if (entryY == null || targetY == null || stopY == null) return null;
+  // x de la entrada: borde izquierdo de la caja (tiempo real del click).
+  const entryX = timeMsToCoordinateRobust({
+    timeMs: d.points[0].time, chart, bars: ctx.bars, future: ctx.future,
+  });
+  if (entryX == null) return null;
+  // x del borde derecho = endTime (points[1].time). Si el futuro no proyecta,
+  // se usa un ancho fijo para que la caja igualmente se renderice.
+  const endX = timeMsToCoordinateRobust({
+    timeMs: d.points[1].time, chart, bars: ctx.bars, future: ctx.future,
+  });
+  const x0 = entryX;
+  const x1 = endX != null && endX > entryX + 8 ? endX : entryX + POSITION_DEFAULT_WIDTH_PX;
+  return {
+    entry: { x: x0, y: Number(entryY) },
+    target: { x: x1, y: Number(targetY) },
+    stop: { x: x1, y: Number(stopY) },
+    x0,
+    x1,
+  };
 }
 
 function renderDrawing(
@@ -1029,7 +1178,30 @@ function renderDrawing(
               ⚠ {m.validationMessage}
             </text>
           )}
-          {rawHandles([d.points[0], d.points[1], d.points[2]])}
+          {/* Manijas (al seleccionar): precio en sus líneas + BORDE DERECHO
+              (resize horizontal de la duración). Se dibujan sobre las
+              coordenadas de la caja (no sobre los puntos crudos) para que NUNCA
+              se desalineen, incluso con endTime en el futuro. */}
+          {selected && (
+            <>
+              <rect x={x0 - 3} y={entry.y - 3} width={6} height={6} fill={SELECT_COLOR} />
+              <rect x={x1 - 3} y={target.y - 3} width={6} height={6} fill={SELECT_COLOR} />
+              <rect x={x1 - 3} y={stop.y - 3} width={6} height={6} fill={SELECT_COLOR} />
+              {/* Manija de borde derecho: barra vertical, cursor ew-resize. */}
+              <rect
+                data-testid="position-right-edge-handle"
+                x={x1 - 2.5}
+                y={entry.y - 8}
+                width={5}
+                height={16}
+                rx={1.5}
+                fill={SELECT_COLOR}
+                stroke="#0d1017"
+                strokeWidth={0.75}
+                style={{ cursor: "ew-resize" }}
+              />
+            </>
+          )}
         </g>
       );
     }

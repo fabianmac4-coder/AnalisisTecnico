@@ -94,7 +94,13 @@ export function DrawingToolbar() {
           key={t.tool}
           title={t.label}
           active={activeTool === t.tool}
-          onClick={() => setActiveTool(t.tool)}
+          onClick={() => {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.debug("[PositionTool] toolbar selected", t.tool);
+            }
+            setActiveTool(t.tool);
+          }}
         >
           {t.icon}
         </IconButton>
