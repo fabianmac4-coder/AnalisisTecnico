@@ -469,6 +469,26 @@ Storage, API responses, and `DrawingPoint.time` are **Unix milliseconds UTC**. L
 `frontend/src/features/drawings/timeConversion.ts` (`msToChartTime` / `chartTimeToMs`); `utils/dates.ts`
 re-exports it. Convert at the chart boundary only — never store seconds.
 
+### Chart timezone display (display-only; never mutates candles)
+A `Zona horaria` selector in the chart toolbar (`features/charts/timezone/`) changes only how time
+labels are FORMATTED — candle timestamps stay Unix ms UTC and market data is NOT reloaded.
+- **Modes** (`ChartTimezoneMode`): `EXCHANGE` / `LOCAL` / `UTC` / `FIXED_OFFSET` (UTC-12…+14) / `IANA`
+  (presets like `America/Mexico_City`). Default = `EXCHANGE` when the backend knows the exchange tz,
+  else `LOCAL`. Persisted per browser in `tradingPlatform.chartTimezoneMode`/`chartTimezoneValue`
+  (zustand `chartTimezoneStore`; NOT in SQL — it's a UI pref).
+- **Central formatter** `chartTimezoneUtils.formatChartTime` (seconds/ms/ISO input): `FIXED_OFFSET`
+  shifts the instant in ms then formats as UTC; `IANA`/`UTC`/`LOCAL`/`EXCHANGE` use `Intl.DateTimeFormat`
+  with the resolved `timeZone`. Pure + unit-tested.
+- **Wiring**: `ChartEngineAdapter.setTimeLabelFormatters({axisTick, crosshair})` →
+  `LightweightChartsAdapter` applies LWC `localization.timeFormatter` (crosshair) +
+  `timeScale.tickMarkFormatter` (axis ticks; `tickMarkType >= 3` = intraday time vs date). `ChartCanvas`
+  calls it on `tzSetting`/`exchangeTimezone` changes. Adapter methods are OPTIONAL so fake instances in
+  tests don't break.
+- **Backend**: OHLCV/candles responses carry ADDITIVE optional `exchangeTimezone`
+  (`C010.TimezoneMercado` → Yahoo meta → `America/New_York` for plain US equities → `UTC`; see
+  `yahoo_service._resolve_meta` + `_us_equity_default_tz`) and `dataTimezone:"UTC"`. The legacy
+  `timezone` field is kept; `apiClient.OHLCVResponse` mirrors both.
+
 ### Canonical price (one price across all six charts)
 The displayed "current price" (header, panel headers, sidebar, the dotted axis price line) comes ONLY
 from `GET /api/market/quote` via `priceResolver.resolveDisplayPrice` (fallback order
@@ -539,6 +559,43 @@ RSI/MACD are separate stacked `MiniIndicatorChart` instances under each panel. T
   `trendline`→`free_line`/`extended_trendline` (by extend flags), seconds→ms points
   (`normalizeDrawingPoint`, threshold 1e11), fills `showOnAllTimeframes`/`fillOpacity`, version → 3.
   Never lose stored drawings; unknown fields pass through.
+
+### Long/Short position planning boxes (`LONG_POSITION`/`SHORT_POSITION`, C0101)
+TradingView-style risk/reward planning boxes (`features/drawings/`). Stored as ordinary C0101 drawings
+(same `ApiDrawingRepository`, same isolation by `C005Id`+`C010Id`+`C030Id`+`sourceTimeframe`) — they are
+NOT C050 simulated entries. The `DrawingType` literal includes the two types on BOTH ends; backend
+`DrawingStyle.position: dict | None` is an OPAQUE passthrough round-tripped via `EstiloJSON` (no schema
+special-casing).
+- **Canonical geometry = 3 points** (one coherent object, never independent points):
+  `points[0]=entry (entryTime, entryPrice)`, `points[1]=target (endTime, targetPrice)`,
+  `points[2]=stop (endTime, stopPrice)`. LONG: `target>entry>stop`; SHORT: `stop>entry>target`.
+  Non-geometry data (quantity/fees/notes/accountCurrency/chartSlotId/range/interval/contextKey) lives in
+  `style.position` (`PositionBoxData`), NOT in points.
+- **Create**: ONE click (entry) + defaults (`positionBoxCalculations.defaultPositionPrices`: LONG
+  target=entry·1.05/stop·0.97, SHORT target·0.95/stop·1.03; `endTime = entryTime +
+  POSITION_DEFAULT_BARS(12)·stepMs`). Box is selected, tool returns to `cursor`. Timeframe-scoped
+  (`showOnAllTimeframes=false`, `showOnTimeframes=[sourceTimeframe]`) — never leaks to other timeframes.
+  `addDrawing` persists FIRST then adds to state; a failed POST surfaces an error toast (DEV shows the
+  real status+detail) — never silent. `[PositionTool]` DEV logs trace toolbar→click→create→save.
+- **Math**: pure `calcPositionBox` (riskPerShare/rewardPerShare, amounts, %, `riskRewardRatio`, P&L,
+  breakeven; fees ADD to risk / SUBTRACT from reward). Never throws — invalid geometry/quantity → `{isValid:false, validationMessage}`.
+- **Render** (`DrawingLayer` LONG/SHORT_POSITION case) uses `positionBoxLocal`, which is ROBUST: y from
+  `priceToCoordinate` (always works), entry x from robust time, right-edge x from `endTime` OR a
+  `POSITION_DEFAULT_WIDTH_PX(120)` fallback when `endTime` is future-unprojectable (box still renders far
+  in the future). Green reward zone entry→target, red risk zone entry→stop, entry line + labels.
+- **Handles & drag** (`positionBoxGeometry.ts`, pure, from a pointer-down snapshot — no drift): hit-test
+  order for position boxes is price corner handles (entry/target/stop) → RIGHT_EDGE (center handle or
+  anywhere on the right vertical border, `cursor:ew-resize`) → body. `dragPositionBoxPoints`: ENTRY drag
+  shifts all three prices by the delta (preserves distances, keeps times); TARGET/STOP change ONLY their
+  price, clamped to the valid side of entry. `resizePositionBoxRightEdge`: RIGHT_EDGE changes ONLY
+  `endTime` (target+stop), prices/entryTime intact, clamped to a positive width. Body drag moves time+price
+  together. `dragRef.mode` adds `"position_resize"`; handles render on the box's computed coords (not raw
+  points) so they never misalign.
+- **Edit/convert**: double-click → `PositionBoxModal` (`positionBoxStore` holds `editingId`): edit
+  type/entry/target/stop/quantity/fees/notes with live calc; Save→`updateDrawing`, Delete, Lock, and
+  **Crear entrada simulada** (optional → creates a C050 with `MetadataJSON.sourceDrawingC0101Id`; the
+  C0101 plan is KEPT). Toolbar: `DrawingToolbar` L▲/S▼ buttons. AI Chat + ChatGPT contexts include a
+  user-scoped `positionPlans` summary (toggle "Planes de posición").
 
 ### Indicators
 Global configs live in `layoutStore.globalIndicators` (rich model: `params` + `style`, ids like
