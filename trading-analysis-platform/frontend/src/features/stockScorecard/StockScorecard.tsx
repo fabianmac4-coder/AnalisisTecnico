@@ -155,7 +155,7 @@ export function StockScorecard() {
     <section className="border-b border-edge">
       <div className="flex items-center justify-between px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
-          Stock Scorecard
+          Análisis de la acción
         </h3>
         {loading && <Spinner size={14} />}
       </div>

@@ -51,4 +51,24 @@ describe("colores por temporalidad", () => {
     const newColors = { ...DEFAULT_TIMEFRAME_DRAWING_COLORS, "1Y_1D": "#000000" };
     expect(resolveDrawingColor(d, newColors)).toBe("#abcdef");
   });
+
+  it("un dibujo con estilo de PANEL fija su color (no depende del timeframe)", () => {
+    // createDrawing con usesTimeframeDefaultColor:false => color FIJO del panel.
+    const d = createDrawing({
+      symbol: "AAPL",
+      sourceTimeframe: "1Y_1D",
+      type: "free_line",
+      points: [
+        { time: 1, price: 1 },
+        { time: 2, price: 2 },
+      ],
+      color: "#f97316", // naranja elegido en el panel
+      usesTimeframeDefaultColor: false,
+    });
+    expect(d.style.usesTimeframeDefaultColor).toBe(false);
+    expect(d.style.color).toBe("#f97316");
+    // Aunque cambie el color de la temporalidad 1Y_1D, el dibujo sigue naranja.
+    const newColors = { ...DEFAULT_TIMEFRAME_DRAWING_COLORS, "1Y_1D": "#000000" };
+    expect(resolveDrawingColor(d, newColors)).toBe("#f97316");
+  });
 });

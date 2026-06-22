@@ -142,7 +142,7 @@ function FullViewBody({
         <div className="flex items-center justify-between border-b border-edge px-4 py-2">
           <div>
             <span className="text-sm font-semibold text-gray-100">
-              {symbol} · Stock Scorecard
+              {symbol} · Análisis de la acción
             </span>
             {sc.companyName && (
               <span className="ml-2 text-xs text-muted">{sc.companyName}</span>

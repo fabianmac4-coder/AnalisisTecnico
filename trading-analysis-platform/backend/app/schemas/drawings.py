@@ -48,6 +48,8 @@ class DrawingStyle(BaseModel):
     extendLeft: bool | None = False
     extendRight: bool | None = False
     usesTimeframeDefaultColor: bool | None = True
+    # Slot dueño (chart_1..chart_6); identidad de visibilidad en el frontend.
+    chartSlotId: str | None = None
     # Datos NO geométricos de las cajas de posición (LONG/SHORT): cantidad, fees,
     # notas, moneda y contexto de la gráfica. Passthrough opaco (round-trip por
     # EstiloJSON). None para todos los demás tipos de dibujo.

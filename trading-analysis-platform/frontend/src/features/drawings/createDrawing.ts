@@ -9,6 +9,7 @@ import {
   type DrawingStyle,
   type DrawingPoint,
   type DrawingType,
+  type LineStyleName,
   type PositionBoxData,
 } from "./drawingTypes";
 
@@ -27,9 +28,22 @@ export interface CreateDrawingParams {
   type: DrawingType;
   points: DrawingPoint[];
   color?: string;
+  /** Grosor de línea del PANEL (px). Override del default del tipo. */
+  width?: number;
+  /** Estilo de línea del PANEL. No pisa la herramienta `dotted_line` (siempre punteada). */
+  lineStyle?: LineStyleName;
+  /** Gráfica/panel dueño del dibujo (`chart_1`…`chart_6`). Identidad de visibilidad. */
+  chartSlotId?: string;
   label?: string;
   /** Datos extra de una caja LONG/SHORT_POSITION (cantidad, fees, notas…). */
   position?: PositionBoxData;
+  /**
+   * Si el color lo gobierna la temporalidad (legado) o si es un color FIJO
+   * (p. ej. el estilo del PANEL). Por defecto se infiere (hay color explícito ⇒
+   * timeframe-default, comportamiento previo). Los dibujos creados con el estilo
+   * del panel pasan `false`: así NO cambian de color al cambiar el range/interval.
+   */
+  usesTimeframeDefaultColor?: boolean;
 }
 
 /** Estilo por defecto segun el tipo de dibujo. */
@@ -65,6 +79,13 @@ export function createDrawing(params: CreateDrawingParams): Drawing {
   const color = params.color ?? DEFAULT_DRAWING_STYLE.color;
   // Las cajas de posición se acotan a SU temporalidad (no son globales).
   const isPosition = isPositionTool(params.type as never);
+  // Estilo base del tipo + overrides del PANEL (grosor y estilo de línea). La
+  // herramienta `dotted_line` conserva su punteado (la herramienta manda).
+  const baseStyle = styleForType(params.type, color);
+  if (params.width != null) baseStyle.width = params.width;
+  if (params.lineStyle != null && params.type !== "dotted_line") {
+    baseStyle.lineStyle = params.lineStyle;
+  }
   return {
     id: uuid(),
     symbol: params.symbol.toUpperCase(),
@@ -73,10 +94,14 @@ export function createDrawing(params: CreateDrawingParams): Drawing {
     type: params.type,
     points: params.points,
     style: {
-      ...styleForType(params.type, color),
+      ...baseStyle,
       label: params.label,
-      // El color por defecto lo gobierna la temporalidad de origen.
-      usesTimeframeDefaultColor: params.color !== undefined,
+      // Legado: el color lo gobierna la temporalidad. Con estilo de panel se
+      // pasa `false` para fijar el color guardado (independiente del timeframe).
+      usesTimeframeDefaultColor:
+        params.usesTimeframeDefaultColor ?? params.color !== undefined,
+      // Identidad de visibilidad = gráfica/slot (no la temporalidad).
+      ...(params.chartSlotId ? { chartSlotId: params.chartSlotId } : {}),
       ...(params.position ? { position: params.position } : {}),
     },
     visible: true,

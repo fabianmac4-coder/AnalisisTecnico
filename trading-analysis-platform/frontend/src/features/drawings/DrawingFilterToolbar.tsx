@@ -1,84 +1,120 @@
-import { useLayoutStore } from "@/stores/layoutStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
-import { TIMEFRAME_PRESETS, type PresetKey } from "@/utils/timeframes";
+import {
+  RANGE_LABEL,
+  INTERVAL_LABEL,
+  type ChartSlotConfig,
+} from "@/features/charts/chartWorkspaceTypes";
+import {
+  useDrawingStyleStore,
+  defaultColorForSlot,
+  DEFAULT_PANEL_STYLE,
+} from "./drawingStyleStore";
+import {
+  useDrawingOriginVisibilityStore,
+  originVisKey,
+} from "./drawingOriginVisibilityStore";
 
-// Etiquetas cortas para una barra compacta (no "4 años / Semanal").
-const SHORT_LABEL: Record<PresetKey, string> = {
-  "4Y_1W": "4Y W",
-  "1Y_1D": "1Y D",
-  "6M_1D": "6M D",
-  "3M_1D": "3M D",
-  "1M_1H": "1M H",
-  "1W_30M": "1W 30M",
-};
+interface Props {
+  /** Workspace activo: el estilo se acota por `${c030Id}:${slotId}`. */
+  c030Id?: number;
+  /** Slots del workspace activo (Gráfica 1…N). */
+  slots: ChartSlotConfig[];
+}
 
 /**
- * Barra compacta de fuentes de dibujo: una pill por temporalidad de origen.
- * - Click en el cuerpo de la pill -> mostrar/ocultar (NO destructivo).
- * - Click en el punto de color -> color picker (sin alternar visibilidad).
- * - Click en la ✕ (sutil, hover rojo) -> borrar los dibujos de esa
- *   temporalidad, con confirmacion.
+ * Gestión de dibujos por GRÁFICA DE ORIGEN. Los dibujos son del ANÁLISIS y se
+ * replican en las seis gráficas; estos controles actúan GLOBAL (en las seis)
+ * según la gráfica donde se CREÓ cada dibujo:
+ * - Color: estilo de dibujos NUEVOS creados desde esa Gráfica.
+ * - 👁 Mostrar/ocultar: oculta los dibujos creados desde esa Gráfica (sin borrar).
+ * - ✕ Borrar: soft-delete de los dibujos creados desde esa Gráfica.
  */
-export function DrawingFilterToolbar() {
-  const filters = useLayoutStore((s) => s.drawingVisibilityFilters);
-  const colors = useLayoutStore((s) => s.timeframeDrawingColors);
-  const toggleTf = useLayoutStore((s) => s.toggleDrawingTimeframe);
-  const setColor = useLayoutStore((s) => s.setTimeframeColor);
+export function DrawingFilterToolbar({ c030Id, slots }: Props) {
+  const panelStyles = useDrawingStyleStore((s) => s.panelStyles);
+  const setPanelStyle = useDrawingStyleStore((s) => s.setPanelStyle);
+  const hidden = useDrawingOriginVisibilityStore((s) => s.hidden);
+  const toggleOrigin = useDrawingOriginVisibilityStore((s) => s.toggle);
   const activeSymbol = useChartStore((s) => s.activeSymbol);
-  const deleteByTimeframe = useDrawingStore((s) => s.deleteByTimeframe);
+  const deleteByOriginSlot = useDrawingStore((s) => s.deleteByOriginSlot);
 
-  const onDeleteTf = (tf: PresetKey) => {
-    if (!activeSymbol) return;
-    if (
-      window.confirm(`¿Borrar todos los dibujos creados en ${SHORT_LABEL[tf]} para ${activeSymbol}?`)
-    ) {
-      void deleteByTimeframe(activeSymbol, tf);
-    }
-  };
+  if (slots.length === 0) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-edge bg-panel px-3 py-1.5">
       <span className="mr-0.5 text-[11px] font-medium text-muted">Dibujos</span>
 
-      {TIMEFRAME_PRESETS.map((p) => {
-        const on = filters[p.key];
+      {slots.map((slot, i) => {
+        const key = `${c030Id ?? "_"}:${slot.slotId}`;
+        const style = panelStyles[key] ?? {
+          ...DEFAULT_PANEL_STYLE,
+          color: defaultColorForSlot(slot.slotId),
+        };
+        const isHidden =
+          !!activeSymbol && hidden[originVisKey(c030Id, activeSymbol, slot.slotId)] === true;
+        const onToggle = () => {
+          if (activeSymbol) toggleOrigin(c030Id, activeSymbol, slot.slotId);
+        };
+        const onDelete = () => {
+          if (!activeSymbol) return;
+          if (
+            window.confirm(
+              `¿Seguro que quieres borrar todos los dibujos creados desde Gráfica ${i + 1}?\n` +
+                "Se eliminarán de todas las gráficas de este análisis."
+            )
+          ) {
+            void deleteByOriginSlot(activeSymbol, slot.slotId);
+          }
+        };
         return (
           <div
-            key={p.key}
-            onClick={() => toggleTf(p.key)}
-            title={on ? "Ocultar dibujos de esta temporalidad" : "Mostrar"}
+            key={slot.slotId}
             className={[
-              "inline-flex cursor-pointer select-none items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors",
-              on
-                ? "border-edge bg-panel-3 text-gray-100"
-                : "border-transparent text-muted opacity-50 hover:opacity-80",
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px]",
+              isHidden
+                ? "border-transparent text-muted opacity-60"
+                : "border-edge bg-panel-3 text-gray-100",
             ].join(" ")}
           >
+            {/* Color de dibujos NUEVOS creados desde esta Gráfica. */}
             <label
-              onClick={(e) => e.stopPropagation()}
-              title="Cambiar color"
-              className="relative flex h-3 w-3 cursor-pointer items-center justify-center"
+              title="Color de dibujos nuevos creados desde esta gráfica"
+              data-testid={`gfx-color-${slot.slotId}`}
+              className="relative flex h-3.5 w-3.5 cursor-pointer items-center justify-center"
             >
               <span
-                className="h-2.5 w-2.5 rounded-full ring-1 ring-black/40"
-                style={{ backgroundColor: colors[p.key] }}
+                className="h-3 w-3 rounded-full ring-1 ring-black/40"
+                style={{ backgroundColor: style.color }}
               />
               <input
                 type="color"
-                value={colors[p.key]}
-                onChange={(e) => setColor(p.key, e.target.value)}
+                value={style.color}
+                onChange={(e) => setPanelStyle(c030Id, slot.slotId, { color: e.target.value })}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               />
             </label>
-            <span>{SHORT_LABEL[p.key]}</span>
+
+            <span className="font-medium" title={`${RANGE_LABEL[slot.range]} · ${INTERVAL_LABEL[slot.interval]}`}>
+              Dibujos de Gráfica {i + 1}
+            </span>
+
+            {/* Mostrar/ocultar (por gráfica de origen, en las seis). */}
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteTf(p.key);
-              }}
+              onClick={onToggle}
               disabled={!activeSymbol}
-              title={`Borrar dibujos de ${SHORT_LABEL[p.key]} (con confirmación)`}
+              data-testid={`gfx-toggle-${slot.slotId}`}
+              title={isHidden ? "Mostrar dibujos de esta gráfica" : "Ocultar dibujos de esta gráfica"}
+              className="flex h-4 w-4 items-center justify-center rounded-full text-[10px] hover:bg-panel-2 disabled:opacity-30"
+            >
+              {isHidden ? "🚫" : "👁"}
+            </button>
+
+            {/* Borrar (por gráfica de origen, con confirmación). */}
+            <button
+              onClick={onDelete}
+              disabled={!activeSymbol}
+              data-testid={`gfx-delete-${slot.slotId}`}
+              title={`Borrar dibujos creados desde Gráfica ${i + 1} (con confirmación)`}
               className="flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-muted transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-30"
             >
               ✕

@@ -2,6 +2,17 @@ import { useMemo, useState } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import {
+  useDrawingStyleStore,
+  panelStyleKey,
+  defaultColorForSlot,
+  DEFAULT_PANEL_STYLE,
+} from "@/features/drawings/drawingStyleStore";
+import {
+  useDrawingOriginVisibilityStore,
+  originVisKey,
+} from "@/features/drawings/drawingOriginVisibilityStore";
+import { ORIGIN_SLOT_IDS } from "@/features/charts/chartWorkspaceTypes";
 import { useChartWorkspaceStore } from "@/features/charts/chartWorkspaceStore";
 import {
   INTERVAL_LABEL,
@@ -60,21 +71,38 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
   const allDrawings = useDrawingStore((s) => s.drawingsBySymbol[symbol]) ?? [];
   const [drawingsVisible, setDrawingsVisible] = useState(true);
 
-  const visibilityFilters = useLayoutStore((s) => s.drawingVisibilityFilters);
   const timeframeColors = useLayoutStore((s) => s.timeframeDrawingColors);
   const globalIndicators = useLayoutStore((s) => s.globalIndicators);
 
+  // Estilo de dibujo POR PANEL (slot), NO por temporalidad. El color del panel
+  // sobrevive a cambios de range/interval. Sin estilo guardado ⇒ color propio del
+  // slot (chart_1…chart_6), NUNCA derivado del timeframe. Se subscribe a SU clave.
+  const styleKey = panelStyleKey(c030Id, slot.slotId);
+  const panelStyle =
+    useDrawingStyleStore((s) => s.panelStyles[styleKey]) ?? {
+      ...DEFAULT_PANEL_STYLE,
+      color: defaultColorForSlot(slot.slotId),
+    };
+  const setPanelStyle = useDrawingStyleStore((s) => s.setPanelStyle);
+
+  // Toggles "Dibujos de Gráfica N" (ocultan por gráfica de ORIGEN, en las seis).
+  const originHidden = useDrawingOriginVisibilityStore((s) => s.hidden);
+  const hiddenOrigins = useMemo(() => {
+    const set = new Set<string>();
+    for (const sid of ORIGIN_SLOT_IDS) {
+      if (originHidden[originVisKey(c030Id, symbol, sid)]) set.add(sid);
+    }
+    return set;
+  }, [originHidden, c030Id, symbol]);
+
+  // Los dibujos del análisis (workspace) se REPLICAN en las seis gráficas: cada
+  // panel recibe la misma lista (menos las gráficas de origen ocultadas).
   const drawings = useMemo(
     () =>
       drawingsVisible
-        ? getVisibleDrawingsForPanel({
-            drawings: allDrawings,
-            activeSymbol: symbol,
-            panelTimeframe: sourceTimeframe,
-            visibilityFilters,
-          })
+        ? getVisibleDrawingsForPanel({ drawings: allDrawings, activeSymbol: symbol, hiddenOrigins })
         : [],
-    [allDrawings, drawingsVisible, sourceTimeframe, symbol, visibilityFilters]
+    [allDrawings, drawingsVisible, symbol, hiddenOrigins]
   );
 
   const bars = data?.bars ?? [];
@@ -127,9 +155,9 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
         <div className="flex min-w-0 items-center gap-2">
           <span
             className="truncate text-xs font-semibold text-gray-200"
-            title={`${workspaceName} · Chart ${index + 1} · ${RANGE_LABEL[slot.range]} / ${INTERVAL_LABEL[slot.interval]}`}
+            title={`${workspaceName} · Gráfica ${index + 1} · ${RANGE_LABEL[slot.range]} / ${INTERVAL_LABEL[slot.interval]}`}
           >
-            Chart {index + 1}
+            Gráfica {index + 1}
           </span>
           <SlotConfigSelector
             range={slot.range}
@@ -140,6 +168,24 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
         </div>
         <div className="flex items-center gap-2">
           <ChartTypeSelector value={chartType} onChange={(t) => setSlotChartType(slot.slotId, t)} compact />
+          {/* Color de los dibujos NUEVOS de ESTE panel (no cambia al cambiar el
+              range/interval; los dibujos ya hechos conservan su color). */}
+          <label
+            title="Color de dibujos nuevos de este panel"
+            data-testid="panel-drawing-color"
+            className="relative flex h-5 w-5 cursor-pointer items-center justify-center rounded"
+          >
+            <span
+              className="h-3.5 w-3.5 rounded-full ring-1 ring-black/40"
+              style={{ backgroundColor: panelStyle.color }}
+            />
+            <input
+              type="color"
+              value={panelStyle.color}
+              onChange={(e) => setPanelStyle(c030Id, slot.slotId, { color: e.target.value })}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+          </label>
           <IconButton
             title={drawingsVisible ? "Ocultar dibujos" : "Mostrar dibujos"}
             active={drawingsVisible}
@@ -200,6 +246,7 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
             symbol={symbol}
             sourceTimeframe={sourceTimeframe}
             c030Id={c030Id}
+            slotId={slot.slotId}
             editable
             overlays={overlays}
             timeframeColors={timeframeColors}

@@ -6,8 +6,11 @@ import { RefreshButton } from "@/features/refresh/RefreshButton";
 import { AutoRefreshMenu } from "@/features/refresh/AutoRefreshMenu";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useChartStore } from "@/stores/chartStore";
+import { useSymbolStore } from "@/stores/symbolStore";
+import { useStockScorecardStore, selectScorecard } from "@/features/stockScorecard/stockScorecardStore";
 import { useAuthStore } from "@/features/auth/authStore";
 import { resolveDisplayPrice } from "@/features/charting/priceResolver";
+import { formatInstrumentDisplayName } from "@/features/symbols/instrumentName";
 import { formatPrice, formatPercent } from "@/utils/formatters";
 
 /** Header superior: marca propia, buscador, precio canonico, usuario. */
@@ -25,6 +28,18 @@ export function Header() {
   const activeSymbol = useChartStore((s) => s.activeSymbol);
   const quote = useChartStore((s) => (activeSymbol ? s.quoteBySymbol[activeSymbol] : undefined));
   const chartDataByPreset = useChartStore((s) => s.chartDataByPreset);
+  // Nombre del instrumento: catálogo (búsqueda) o, si falta, el scorecard del
+  // símbolo activo (Yahoo longName). El header muestra "TICKER · Nombre".
+  const catalog = useSymbolStore((s) => s.catalog);
+  const scorecardName = useStockScorecardStore((s) =>
+    activeSymbol ? selectScorecard(s, activeSymbol)?.companyName : undefined
+  );
+  const catalogName = activeSymbol
+    ? catalog.find((c) => c.symbol === activeSymbol)?.name
+    : undefined;
+  const instrumentDisplay = activeSymbol
+    ? formatInstrumentDisplayName(activeSymbol, catalogName, scorecardName)
+    : "";
   const { price } = resolveDisplayPrice(quote, chartDataByPreset);
   const change = quote?.change ?? null;
   const changePct = quote?.changePercent ?? null;
@@ -50,7 +65,13 @@ export function Header() {
 
       {activeSymbol && (
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold text-gray-100">{activeSymbol}</span>
+          <span
+            className="max-w-[20rem] truncate font-semibold text-gray-100"
+            title={instrumentDisplay}
+            data-testid="active-instrument-name"
+          >
+            {instrumentDisplay}
+          </span>
           {price !== null && (
             <span className={`font-mono ${changeClass}`}>
               {formatPrice(price, quote?.currency)}

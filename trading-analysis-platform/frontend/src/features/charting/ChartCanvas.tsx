@@ -32,6 +32,8 @@ interface Props {
   sourceTimeframe: string;
   /** Workspace activo: los dibujos nuevos se crean en este C030Id. */
   c030Id?: number;
+  /** Slot del panel: el estilo de dibujo se acota por panel, no por timeframe. */
+  slotId?: string;
   editable: boolean;
   showTimeframeLabels?: boolean;
   overlays?: OverlayLine[];
@@ -59,6 +61,7 @@ export function ChartCanvas({
   symbol,
   sourceTimeframe,
   c030Id,
+  slotId,
   editable,
   showTimeframeLabels = false,
   overlays = [],
@@ -246,6 +249,7 @@ export function ChartCanvas({
         symbol={symbol}
         sourceTimeframe={sourceTimeframe}
         c030Id={c030Id}
+        slotId={slotId}
         showTimeframeLabels={showTimeframeLabels}
         timeframeColors={timeframeColors}
         futureInfo={futureInfo}

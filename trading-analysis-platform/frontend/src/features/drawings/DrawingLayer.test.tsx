@@ -5,6 +5,7 @@ import { DrawingLayer } from "./DrawingLayer";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { createDrawing } from "./createDrawing";
 import { useDrawingStore } from "@/stores/drawingStore";
+import { useDrawingStyleStore } from "./drawingStyleStore";
 import type { ChartInstance } from "@/features/charting/chartEngine/ChartEngineAdapter";
 
 // jsdom no implementa ResizeObserver; stub minimo para el overlay.
@@ -557,6 +558,68 @@ describe("DrawingLayer (cajas de posición Long/Short)", () => {
       expect(saved.points[1].price).toBe(150);
       expect(saved.points[2].price).toBe(50);
     });
+  });
+});
+
+describe("DrawingLayer (estilo de dibujo POR PANEL, no por timeframe)", () => {
+  it("un dibujo nuevo en un panel usa el color del PANEL (fijo, no del timeframe)", async () => {
+    // Color del panel (slot chart_1 del workspace 7) = naranja.
+    useDrawingStyleStore.getState().setPanelStyle(7, "chart_1", { color: "#f97316" });
+    useDrawingStore.setState({ activeTool: "free_line", selectedDrawingId: null });
+    const inst = makeFakeInstance();
+    const { container } = render(
+      <DrawingLayer
+        instance={inst}
+        drawings={[]}
+        editable
+        symbol="AAPL"
+        c030Id={7}
+        slotId="chart_1"
+        sourceTimeframe="1Y_1D"
+      />
+    );
+    const svg = container.querySelector("svg.drawing-overlay")!;
+    fireEvent.pointerDown(svg, { clientX: 50, clientY: 30, pointerId: 1 });
+    fireEvent.pointerMove(svg, { clientX: 80, clientY: 60, pointerId: 1 });
+    fireEvent.pointerDown(svg, { clientX: 80, clientY: 60, pointerId: 1 });
+
+    await waitFor(() => {
+      const data = JSON.parse(localStorage.getItem("tap.drawings.v1")!);
+      expect(data.AAPL).toHaveLength(1);
+      const d = data.AAPL[0];
+      // Color FIJO del panel, marcado como NO-timeframe-default: no cambiará si
+      // el panel cambia de range/interval (su sourceTimeframe).
+      expect(d.style.color).toBe("#f97316");
+      expect(d.style.usesTimeframeDefaultColor).toBe(false);
+      expect(d.sourceTimeframe).toBe("1Y_1D");
+    });
+  });
+
+  it("el PREVIEW usa el color del panel (no un color temporal distinto)", () => {
+    useDrawingStyleStore.getState().setPanelStyle(7, "chart_1", { color: "#f97316" });
+    useDrawingStore.setState({ activeTool: "free_line", selectedDrawingId: null });
+    const inst = makeFakeInstance();
+    const { container } = render(
+      <DrawingLayer
+        instance={inst}
+        drawings={[]}
+        editable
+        symbol="AAPL"
+        c030Id={7}
+        slotId="chart_1"
+        sourceTimeframe="1Y_1D"
+      />
+    );
+    const svg = container.querySelector("svg.drawing-overlay")!;
+    // Primer click + movimiento: aparece el PREVIEW (aún no se persiste).
+    fireEvent.pointerDown(svg, { clientX: 50, clientY: 30, pointerId: 1 });
+    fireEvent.pointerMove(svg, { clientX: 80, clientY: 60, pointerId: 1 });
+    // La línea de preview debe tener el color del panel (naranja), igual que el final.
+    const previewLine = container.querySelector("line");
+    expect(previewLine).toBeTruthy();
+    expect(previewLine!.getAttribute("stroke")).toBe("#f97316");
+    // Y todavía no se guardó nada (sigue siendo preview).
+    expect(localStorage.getItem("tap.drawings.v1")).toBeFalsy();
   });
 });
 

@@ -14,6 +14,7 @@ import {
 import { createDrawing } from "./createDrawing";
 import { calcPositionBox, defaultPositionPrices } from "./positionBoxCalculations";
 import { dragPositionBoxPoints, resizePositionBoxRightEdge } from "./positionBoxGeometry";
+import { useDrawingStyleStore } from "./drawingStyleStore";
 import { usePositionBoxStore } from "./positionBoxStore";
 import { showToast } from "@/components/ui/toastStore";
 import { ApiError } from "@/services/apiClient";
@@ -44,6 +45,8 @@ interface Props {
   sourceTimeframe: string;
   /** Workspace activo: los dibujos nuevos se crean con este C030Id. */
   c030Id?: number;
+  /** Slot del panel: el estilo de dibujos NUEVOS se acota por panel, no timeframe. */
+  slotId?: string;
   showTimeframeLabels?: boolean;
   /** Colores por temporalidad para resolver el color efectivo de cada dibujo. */
   timeframeColors?: Record<string, string>;
@@ -119,6 +122,7 @@ export function DrawingLayer({
   symbol,
   sourceTimeframe,
   c030Id,
+  slotId,
   showTimeframeLabels = false,
   timeframeColors = DEFAULT_TIMEFRAME_DRAWING_COLORS,
   futureInfo = null,
@@ -307,18 +311,35 @@ export function DrawingLayer({
   // ---- Creacion del dibujo ----
   const finalize = useCallback(
     async (tool: TwoPointTool, points: DrawingPoint[]) => {
+      // Estilo POR PANEL (slot), no por temporalidad: el color queda FIJO en el
+      // dibujo y no cambia al cambiar el range/interval del panel. Sin slotId
+      // (callers heredados/tests) se conserva el comportamiento previo.
+      let color = timeframeColors[sourceTimeframe] ?? DRAW_COLOR;
+      let width: number | undefined;
+      let lineStyle: Drawing["style"]["lineStyle"] | undefined;
+      let usesTimeframeDefaultColor = true;
+      if (slotId) {
+        const panel = useDrawingStyleStore.getState().getPanelStyle(c030Id, slotId);
+        color = panel.color;
+        width = panel.lineWidth;
+        lineStyle = panel.lineStyle;
+        usesTimeframeDefaultColor = false;
+      }
       const drawing = createDrawing({
         symbol,
         c030Id,
         sourceTimeframe,
         type: tool,
         points,
-        // El color por defecto lo decide la temporalidad de origen.
-        color: timeframeColors[sourceTimeframe] ?? DRAW_COLOR,
+        color,
+        width,
+        lineStyle,
+        usesTimeframeDefaultColor,
+        chartSlotId: slotId,
       });
       await addDrawing(drawing);
     },
-    [symbol, c030Id, sourceTimeframe, addDrawing, timeframeColors]
+    [symbol, c030Id, slotId, sourceTimeframe, addDrawing, timeframeColors]
   );
 
   // Crea una caja de posición con UN click (entry) + target/stop/duración por
@@ -339,11 +360,14 @@ export function DrawingLayer({
         sourceTimeframe,
         type: tool,
         points,
+        // Identidad de visibilidad por gráfica/slot (no por temporalidad).
+        chartSlotId: slotId,
         position: {
           toolType: tool,
           quantity: 1,
           fees: 0,
           accountCurrency: "USD",
+          chartSlotId: slotId,
           chartContextKey: sourceTimeframe,
         },
       });
@@ -382,7 +406,7 @@ export function DrawingLayer({
         );
       }
     },
-    [symbol, c030Id, sourceTimeframe, futureInfo, addDrawing, setActiveTool, selectDrawing]
+    [symbol, c030Id, slotId, sourceTimeframe, futureInfo, addDrawing, setActiveTool, selectDrawing]
   );
 
   const localToDrawing = (e: React.PointerEvent): { local: LocalPoint; dp: DrawingPoint | null } => {
@@ -718,10 +742,14 @@ export function DrawingLayer({
     }
   }
 
-  // Preview acorde a la herramienta activa.
+  // Preview acorde a la herramienta activa. Usa el MISMO color que tendrá el
+  // dibujo final (el estilo del PANEL/slot), no el color por temporalidad, para
+  // que la línea no "cambie de color" al soltar.
   let previewEl: JSX.Element | null = null;
   if (chart && mainSeries && interaction.mode === "awaiting_second_point" && interaction.previewPoint) {
-    const previewColor = timeframeColors[sourceTimeframe] ?? DRAW_COLOR;
+    const previewColor = slotId
+      ? useDrawingStyleStore.getState().getPanelStyle(c030Id, slotId).color
+      : timeframeColors[sourceTimeframe] ?? DRAW_COLOR;
     previewEl = renderPreview(
       interaction.tool,
       interaction.firstPoint,

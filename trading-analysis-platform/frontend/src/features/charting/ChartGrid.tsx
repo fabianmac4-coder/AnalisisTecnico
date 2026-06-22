@@ -63,7 +63,7 @@ export function ChartGrid() {
     <div className="flex h-full flex-col">
       <WorkspaceTabBar symbol={activeSymbol} />
       <ChartToolbar symbol={activeSymbol} />
-      <DrawingFilterToolbar />
+      <DrawingFilterToolbar c030Id={activeWorkspace?.c030Id} slots={slots} />
       <IndicatorToolbar />
       <div className="grid flex-1 grid-cols-1 gap-2 overflow-auto p-2 md:grid-cols-2 xl:grid-cols-3">
         {slots.map((slot, i) => (

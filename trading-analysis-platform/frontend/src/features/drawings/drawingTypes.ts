@@ -118,6 +118,13 @@ export interface DrawingStyle {
   extendRight?: boolean;
   /** Si true, el color efectivo lo decide el color por temporalidad de origen. */
   usesTimeframeDefaultColor?: boolean;
+  /**
+   * Gráfica/panel dueño del dibujo (`chart_1`…`chart_6`). IDENTIDAD de
+   * visibilidad: el dibujo aparece SOLO en su slot, sin importar el range/
+   * interval actual del panel. Se persiste vía EstiloJSON (passthrough). Los
+   * dibujos viejos sin este campo se mapean por su temporalidad de origen.
+   */
+  chartSlotId?: string;
   /** Datos extra de las cajas LONG/SHORT_POSITION (cantidad, fees, notas…). */
   position?: PositionBoxData;
 }

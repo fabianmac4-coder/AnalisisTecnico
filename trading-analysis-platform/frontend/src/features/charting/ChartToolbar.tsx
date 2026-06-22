@@ -1,5 +1,8 @@
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
+import { useSymbolStore } from "@/stores/symbolStore";
+import { useStockScorecardStore, selectScorecard } from "@/features/stockScorecard/stockScorecardStore";
+import { formatInstrumentDisplayName } from "@/features/symbols/instrumentName";
 import type { ChartType } from "./chartEngine/ChartEngineAdapter";
 import { ChartTimezoneSelector } from "@/features/charts/timezone/ChartTimezoneSelector";
 
@@ -14,6 +17,10 @@ const QUICK_TYPES: { type: ChartType; label: string }[] = [
 export function ChartToolbar({ symbol }: { symbol: string }) {
   const setChartTypeAll = useChartStore((s) => s.setChartTypeAll);
   const activeTool = useDrawingStore((s) => s.activeTool);
+  // Nombre del instrumento: catálogo o scorecard. Muestra "TICKER · Nombre".
+  const catalogName = useSymbolStore((s) => s.catalog.find((c) => c.symbol === symbol)?.name);
+  const scorecardName = useStockScorecardStore((s) => selectScorecard(s, symbol)?.companyName);
+  const instrumentDisplay = formatInstrumentDisplayName(symbol, catalogName, scorecardName);
   // Zona horaria del exchange del símbolo activo (de cualquier slot cargado).
   const exchangeTimezone = useChartStore((s) => {
     for (const d of Object.values(s.chartDataBySlot)) {
@@ -27,7 +34,9 @@ export function ChartToolbar({ symbol }: { symbol: string }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-edge bg-panel px-3 py-1.5">
       <div className="flex items-center gap-2 text-xs text-muted">
-        <span className="font-semibold text-gray-100">{symbol}</span>
+        <span className="max-w-[20rem] truncate font-semibold text-gray-100" title={instrumentDisplay}>
+          {instrumentDisplay}
+        </span>
         <span>·</span>
         <span>
           Herramienta: <span className="text-accent">{activeTool}</span>

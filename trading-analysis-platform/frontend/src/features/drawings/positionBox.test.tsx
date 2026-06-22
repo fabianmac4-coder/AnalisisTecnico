@@ -87,7 +87,7 @@ describe("createDrawing — caja de posición aislada por temporalidad", () => {
   });
 });
 
-describe("getVisibleDrawingsForPanel — la caja NO se filtra a otras temporalidades", () => {
+describe("getVisibleDrawingsForPanel — la caja Long/Short se replica en el análisis", () => {
   const box = createDrawing({
     symbol: "AAPL",
     sourceTimeframe: "1Y_1D",
@@ -97,26 +97,18 @@ describe("getVisibleDrawingsForPanel — la caja NO se filtra a otras temporalid
       { time: 2_000, price: 105 },
       { time: 2_000, price: 97 },
     ],
+    chartSlotId: "chart_2",
     position: { toolType: "LONG_POSITION", quantity: 1 },
   });
 
-  it("visible en su propia temporalidad (1Y_1D)", () => {
-    const vis = getVisibleDrawingsForPanel({
-      drawings: [box],
-      activeSymbol: "AAPL",
-      panelTimeframe: "1Y_1D",
-      visibilityFilters: {},
-    });
+  it("se incluye en la lista del análisis (visible en cualquier gráfica)", () => {
+    const vis = getVisibleDrawingsForPanel({ drawings: [box], activeSymbol: "AAPL" });
     expect(vis.map((d) => d.id)).toEqual([box.id]);
   });
 
-  it("NO visible en otra temporalidad (6M_1D)", () => {
-    const vis = getVisibleDrawingsForPanel({
-      drawings: [box],
-      activeSymbol: "AAPL",
-      panelTimeframe: "6M_1D",
-      visibilityFilters: {},
-    });
+  it("no se incluye si es de otro símbolo", () => {
+    const other = { ...box, symbol: "TSLA" };
+    const vis = getVisibleDrawingsForPanel({ drawings: [other], activeSymbol: "AAPL" });
     expect(vis).toEqual([]);
   });
 });

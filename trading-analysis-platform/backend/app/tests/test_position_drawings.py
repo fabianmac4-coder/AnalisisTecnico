@@ -74,6 +74,40 @@ def test_invalid_drawing_type_rejected(client, db_session):
     assert client.post("/api/drawings", json=payload, headers=headers).status_code == 422
 
 
+def _line_payload(c030_id: int, source_tf: str, slot_id: str) -> dict:
+    return {
+        "symbol": "AAPL",
+        "c030Id": c030_id,
+        "sourceTimeframe": source_tf,
+        "type": "free_line",
+        "points": [{"time": 1.0, "price": 1.0}, {"time": 2.0, "price": 2.0}],
+        # chartSlotId viaja dentro de EstiloJSON (passthrough opaco).
+        "style": {"color": "#ffffff", "chartSlotId": slot_id},
+        "visible": True,
+        "locked": False,
+        "showOnAllTimeframes": True,
+        "version": 3,
+    }
+
+
+def test_chart_slot_id_roundtrips_and_listing_ignores_timeframe(client, db_session):
+    headers = _auth(client, db_session)
+    ws = _ws(client, headers)
+    # Dos dibujos en chart_1 con DISTINTA temporalidad de origen.
+    a = client.post("/api/drawings", json=_line_payload(ws, "4Y_1W", "chart_1"), headers=headers)
+    b = client.post("/api/drawings", json=_line_payload(ws, "1W_30M", "chart_1"), headers=headers)
+    assert a.status_code == 201, a.text
+    assert b.status_code == 201, b.text
+    # chartSlotId round-trip vía EstiloJSON.
+    assert a.json()["style"]["chartSlotId"] == "chart_1"
+    # El GET del workspace devuelve AMBOS, sin filtrar por temporalidad.
+    rows = client.get(
+        "/api/drawings", params={"symbol": "AAPL", "c030Id": ws}, headers=headers
+    ).json()
+    slots = [r["style"].get("chartSlotId") for r in rows]
+    assert slots.count("chart_1") == 2
+
+
 # --------------------------------------------------------------------------
 # Aislamiento: no se crea/edita/borra la caja de otro usuario
 # --------------------------------------------------------------------------

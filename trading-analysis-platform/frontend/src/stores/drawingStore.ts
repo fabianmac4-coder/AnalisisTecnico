@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Drawing, DrawingTool } from "@/features/drawings/drawingTypes";
+import { getDrawingOriginChartSlotId } from "@/features/drawings/drawingFilters";
 import type { DrawingRepository } from "@/repositories/DrawingRepository";
 import { ApiDrawingRepository } from "@/repositories/ApiDrawingRepository";
 import { LocalStorageDrawingRepository } from "@/repositories/LocalStorageDrawingRepository";
@@ -25,6 +26,8 @@ interface DrawingState {
   removeDrawing: (id: string) => Promise<void>;
   clearForSymbol: (symbol: string) => Promise<void>;
   deleteByTimeframe: (symbol: string, sourceTimeframe: string) => Promise<void>;
+  /** Borra (soft) los dibujos creados DESDE una gráfica (chart_N), en las seis. */
+  deleteByOriginSlot: (symbol: string, slotId: string) => Promise<void>;
   setActiveTool: (tool: DrawingTool) => void;
   selectDrawing: (id: string | null) => void;
   getDrawings: (symbol: string) => Drawing[];
@@ -95,6 +98,24 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       drawingsBySymbol: {
         ...get().drawingsBySymbol,
         [symbol]: list.filter((d) => d.sourceTimeframe !== sourceTimeframe),
+      },
+      selectedDrawingId: null,
+    });
+  },
+
+  async deleteByOriginSlot(symbol, slotId) {
+    symbol = symbol.toUpperCase();
+    const list = get().drawingsBySymbol[symbol] ?? [];
+    // Acota a la gráfica de ORIGEN (donde se creó), no a la temporalidad. Borra
+    // los dibujos de ese chart_N del análisis cargado (usuario+acción+workspace);
+    // como se replican, desaparecen de las seis gráficas.
+    const match = (d: Drawing) => getDrawingOriginChartSlotId(d) === slotId;
+    const toRemove = list.filter(match);
+    await Promise.all(toRemove.map((d) => drawingRepo.remove(d.id)));
+    set({
+      drawingsBySymbol: {
+        ...get().drawingsBySymbol,
+        [symbol]: list.filter((d) => !match(d)),
       },
       selectedDrawingId: null,
     });

@@ -5,10 +5,15 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import {
   INTERVAL_LABEL,
   RANGE_LABEL,
+  ORIGIN_SLOT_IDS,
   isIntradayInterval,
   slotSourceTimeframe,
   type ChartSlotConfig,
 } from "@/features/charts/chartWorkspaceTypes";
+import {
+  useDrawingOriginVisibilityStore,
+  originVisKey,
+} from "@/features/drawings/drawingOriginVisibilityStore";
 import {
   useChartWorkspaceStore,
   selectActiveWorkspace,
@@ -61,7 +66,6 @@ export function ExpandedChartModal({ slot, symbol, onClose }: Props) {
   const chartDataBySlot = useChartStore((s) => s.chartDataBySlot);
   const canonicalPrice = resolveDisplayPriceFromSlots(quote, Object.values(chartDataBySlot));
   const allDrawings = useDrawingStore((s) => s.drawingsBySymbol[symbol]) ?? [];
-  const visibilityFilters = useLayoutStore((s) => s.drawingVisibilityFilters);
   const timeframeColors = useLayoutStore((s) => s.timeframeDrawingColors);
 
   const [enabled, setEnabled] = useState<Record<OverlayKey, boolean>>({
@@ -76,11 +80,18 @@ export function ExpandedChartModal({ slot, symbol, onClose }: Props) {
   const [showMacd, setShowMacd] = useState(true);
 
   const bars = data?.bars ?? [];
+  const originHidden = useDrawingOriginVisibilityStore((s) => s.hidden);
+  const hiddenOrigins = useMemo(() => {
+    const set = new Set<string>();
+    for (const sid of ORIGIN_SLOT_IDS) {
+      if (originHidden[originVisKey(c030Id, symbol, sid)]) set.add(sid);
+    }
+    return set;
+  }, [originHidden, c030Id, symbol]);
   const drawings = getVisibleDrawingsForPanel({
     drawings: allDrawings,
     activeSymbol: symbol,
-    panelTimeframe: sourceTimeframe,
-    visibilityFilters,
+    hiddenOrigins,
   });
 
   const overlays = useMemo<OverlayLine[]>(() => {
@@ -174,6 +185,7 @@ export function ExpandedChartModal({ slot, symbol, onClose }: Props) {
                   symbol={symbol}
                   sourceTimeframe={sourceTimeframe}
                   c030Id={c030Id}
+                  slotId={slot.slotId}
                   editable
                   overlays={overlays}
                   timeframeColors={timeframeColors}

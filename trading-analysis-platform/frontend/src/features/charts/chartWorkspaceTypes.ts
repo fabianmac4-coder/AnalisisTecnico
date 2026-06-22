@@ -94,6 +94,10 @@ export const DEFAULT_CHART_SLOTS: ChartSlotConfig[] = [
   { slotId: "chart_6", range: "1W", interval: "30m" },
 ];
 
+// IDs de las seis gráficas (slots) de un workspace. Se usan como "gráfica de
+// origen" en los controles de gestión de dibujos (mostrar/ocultar/borrar).
+export const ORIGIN_SLOT_IDS: readonly string[] = DEFAULT_CHART_SLOTS.map((s) => s.slotId);
+
 export const DEFAULT_WORKSPACE_NAME = "Default Analysis";
 
 /** contextKey de un slot: identifica la temporalidad para dibujos/Channel R/R. */

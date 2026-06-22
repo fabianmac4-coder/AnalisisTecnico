@@ -1,14 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { createDrawing } from "./createDrawing";
-import { getVisibleDrawingsForPanel, type DrawingVisibilityFilters } from "./drawingFilters";
+import { getVisibleDrawingsForPanel, getDrawingOriginChartSlotId } from "./drawingFilters";
 import type { Drawing } from "./drawingTypes";
 import { PRESET_KEYS, type PresetKey } from "@/utils/timeframes";
 
-const allVisible: DrawingVisibilityFilters = PRESET_KEYS.reduce(
-  (acc, k) => ({ ...acc, [k]: true }),
-  {} as DrawingVisibilityFilters
-);
-
+/** Dibujo VIEJO sin chartSlotId (se mapea por su temporalidad histórica). */
 function line(symbol: string, tf: PresetKey): Drawing {
   return createDrawing({
     symbol,
@@ -19,6 +15,21 @@ function line(symbol: string, tf: PresetKey): Drawing {
       { time: 2, price: 2 },
     ],
     color: "#fff",
+  });
+}
+
+/** Dibujo NUEVO con chartSlotId (identidad por gráfica). */
+function lineInSlot(symbol: string, slotId: string, tf: PresetKey = "1Y_1D"): Drawing {
+  return createDrawing({
+    symbol,
+    sourceTimeframe: tf,
+    type: "free_line",
+    points: [
+      { time: 1, price: 1 },
+      { time: 2, price: 2 },
+    ],
+    color: "#fff",
+    chartSlotId: slotId,
   });
 }
 
@@ -106,100 +117,60 @@ describe("createDrawing (free line, v2)", () => {
   });
 });
 
-describe("getVisibleDrawingsForPanel (dibujos globales)", () => {
-  it("un dibujo creado en 4Y_1W aparece en el panel 1Y_1D", () => {
-    const d = line("AAPL", "4Y_1W");
-    const r = getVisibleDrawingsForPanel({
-      drawings: [d],
-      activeSymbol: "AAPL",
-      panelTimeframe: "1Y_1D",
-      visibilityFilters: allVisible,
-    });
-    expect(r).toHaveLength(1);
-  });
-
-  it("un dibujo creado en 1W_30M aparece en el panel 4Y_1W", () => {
-    const d = line("AAPL", "1W_30M");
-    const r = getVisibleDrawingsForPanel({
-      drawings: [d],
-      activeSymbol: "AAPL",
-      panelTimeframe: "4Y_1W",
-      visibilityFilters: allVisible,
-    });
-    expect(r).toHaveLength(1);
-  });
-
-  it("apagar el filtro 4Y_1W oculta sus dibujos en TODOS los paneles", () => {
-    const d = line("AAPL", "4Y_1W");
-    const filters = { ...allVisible, "4Y_1W": false };
-    for (const panel of PRESET_KEYS) {
-      const r = getVisibleDrawingsForPanel({
-        drawings: [d],
-        activeSymbol: "AAPL",
-        panelTimeframe: panel,
-        visibilityFilters: filters,
-      });
-      expect(r).toHaveLength(0);
+describe("getVisibleDrawingsForPanel (a nivel de WORKSPACE: se replica en las 6)", () => {
+  it("un dibujo del análisis se incluye sin importar su temporalidad de origen", () => {
+    for (const tf of PRESET_KEYS) {
+      const r = getVisibleDrawingsForPanel({ drawings: [line("AAPL", tf)], activeSymbol: "AAPL" });
+      expect(r, `tf ${tf}`).toHaveLength(1);
     }
   });
 
-  it("volver a encender 4Y_1W muestra los dibujos otra vez", () => {
-    const d = line("AAPL", "4Y_1W");
-    const r = getVisibleDrawingsForPanel({
-      drawings: [d],
-      activeSymbol: "AAPL",
-      panelTimeframe: "6M_1D",
-      visibilityFilters: { ...allVisible, "4Y_1W": true },
-    });
-    expect(r).toHaveLength(1);
+  it("un dibujo creado desde chart_2 también se incluye (mismo list para todo panel)", () => {
+    const d = lineInSlot("AAPL", "chart_2", "1Y_1D");
+    expect(getVisibleDrawingsForPanel({ drawings: [d], activeSymbol: "AAPL" })).toHaveLength(1);
   });
 
-  it("no muestra dibujos de otro simbolo", () => {
-    const d = line("TSLA", "1Y_1D");
+  it("conserva su EstiloJSON (NO se recolorea por el panel donde se muestra)", () => {
+    const orange = createDrawing({
+      symbol: "AAPL",
+      sourceTimeframe: "4Y_1W",
+      type: "free_line",
+      points: [{ time: 1, price: 1 }, { time: 2, price: 2 }],
+      color: "#f97316",
+      usesTimeframeDefaultColor: false,
+      chartSlotId: "chart_1",
+    });
+    const [vis] = getVisibleDrawingsForPanel({ drawings: [orange], activeSymbol: "AAPL" });
+    expect(vis.style.color).toBe("#f97316");
+  });
+
+  it("no muestra dibujos de otro símbolo", () => {
     const r = getVisibleDrawingsForPanel({
-      drawings: [d],
+      drawings: [lineInSlot("TSLA", "chart_1")],
       activeSymbol: "AAPL",
-      panelTimeframe: "1Y_1D",
-      visibilityFilters: allVisible,
     });
     expect(r).toHaveLength(0);
-  });
-
-  it("showOnAllTimeframes AUSENTE cuenta como true (datos viejos)", () => {
-    const d = line("AAPL", "1M_1H");
-    delete (d as Partial<Drawing>).showOnAllTimeframes;
-    for (const panel of PRESET_KEYS) {
-      const r = getVisibleDrawingsForPanel({
-        drawings: [d],
-        activeSymbol: "AAPL",
-        panelTimeframe: panel,
-        visibilityFilters: allVisible,
-      });
-      expect(r).toHaveLength(1);
-    }
-  });
-
-  it("dibujos de 1Y_1D/6M_1D/1W_30M son elegibles en el panel 4Y_1W", () => {
-    for (const src of ["1Y_1D", "6M_1D", "1W_30M"] as PresetKey[]) {
-      const r = getVisibleDrawingsForPanel({
-        drawings: [line("AAPL", src)],
-        activeSymbol: "AAPL",
-        panelTimeframe: "4Y_1W",
-        visibilityFilters: allVisible,
-      });
-      expect(r, `desde ${src}`).toHaveLength(1);
-    }
   });
 
   it("no muestra dibujos ocultos (visible=false)", () => {
-    const d = { ...line("AAPL", "1Y_1D"), visible: false };
+    const d = { ...lineInSlot("AAPL", "chart_1"), visible: false };
+    expect(getVisibleDrawingsForPanel({ drawings: [d], activeSymbol: "AAPL" })).toHaveLength(0);
+  });
+
+  it("oculta por GRÁFICA DE ORIGEN (hiddenOrigins) en todos los paneles", () => {
+    const d1 = lineInSlot("AAPL", "chart_1");
+    const d2 = lineInSlot("AAPL", "chart_2");
     const r = getVisibleDrawingsForPanel({
-      drawings: [d],
+      drawings: [d1, d2],
       activeSymbol: "AAPL",
-      panelTimeframe: "1Y_1D",
-      visibilityFilters: allVisible,
+      hiddenOrigins: new Set(["chart_1"]),
     });
-    expect(r).toHaveLength(0);
+    expect(r.map((d) => d.id)).toEqual([d2.id]);
+  });
+
+  it("getDrawingOriginChartSlotId: chartSlotId o mapeo histórico de temporalidad", () => {
+    expect(getDrawingOriginChartSlotId(lineInSlot("AAPL", "chart_3"))).toBe("chart_3");
+    expect(getDrawingOriginChartSlotId(line("AAPL", "1W_30M"))).toBe("chart_6");
   });
 });
 
