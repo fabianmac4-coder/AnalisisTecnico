@@ -15,11 +15,12 @@ import {
   calculateMACD,
   calculateRSI,
   calculateSMA,
+  calculateVWAP,
   type PriceSource,
   type ValuePoint,
 } from "./indicatorCalculations";
 
-export type IndicatorType = "SMA" | "EMA" | "BBANDS" | "VOLUME" | "RSI" | "MACD";
+export type IndicatorType = "SMA" | "EMA" | "BBANDS" | "VOLUME" | "RSI" | "MACD" | "VWAP";
 
 export interface IndicatorStyle {
   color?: string;
@@ -89,7 +90,16 @@ export const DEFAULT_GLOBAL_INDICATORS: GlobalIndicatorConfig[] = [
     visible: false,
     applyToAllTimeframes: true,
     params: { period: 9, source: "close" },
-    style: { color: "#22c55e", lineWidth: 1 },
+    style: { color: "#eab308", lineWidth: 1 }, // amarillo
+  },
+  {
+    id: "ema-20",
+    type: "EMA",
+    name: "EMA 20",
+    visible: false,
+    applyToAllTimeframes: true,
+    params: { period: 20, source: "close" },
+    style: { color: "#3b82f6", lineWidth: 1 }, // azul
   },
   {
     id: "ema-21",
@@ -98,7 +108,35 @@ export const DEFAULT_GLOBAL_INDICATORS: GlobalIndicatorConfig[] = [
     visible: false,
     applyToAllTimeframes: true,
     params: { period: 21, source: "close" },
-    style: { color: "#a855f7", lineWidth: 1 },
+    style: { color: "#f97316", lineWidth: 1 }, // naranja (distinto de EMA 50)
+  },
+  {
+    id: "ema-50",
+    type: "EMA",
+    name: "EMA 50",
+    visible: false,
+    applyToAllTimeframes: true,
+    params: { period: 50, source: "close" },
+    style: { color: "#a855f7", lineWidth: 1 }, // morado
+  },
+  {
+    id: "ema-200",
+    type: "EMA",
+    name: "EMA 200",
+    visible: false,
+    applyToAllTimeframes: true,
+    params: { period: 200, source: "close" },
+    style: { color: "#ef4444", lineWidth: 1 }, // rojo
+  },
+  {
+    id: "vwap",
+    type: "VWAP",
+    name: "VWAP",
+    visible: false,
+    applyToAllTimeframes: true,
+    // Solo intradía (1m…1h); en diario/superior se oculta. Reset diario.
+    params: { source: "typicalPrice", reset: "SESSION_DAILY", intradayOnly: true },
+    style: { color: "#06b6d4", lineWidth: 1 }, // cyan
   },
   {
     id: "bbands-20-2",
@@ -235,11 +273,13 @@ function num(
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
-/** Overlays sobre el precio (SMA/EMA/Bollinger) para UN panel. */
+/** Overlays sobre el precio (SMA/EMA/Bollinger/VWAP) para UN panel. `intraday`
+ *  decide si el VWAP (solo intradía) se calcula en este panel. */
 export function buildPriceOverlays(
   allBars: Candle[],
   visibleFromMs: number,
-  indicators: GlobalIndicatorConfig[]
+  indicators: GlobalIndicatorConfig[],
+  intraday = false
 ): OverlayLine[] {
   if (allBars.length === 0) return [];
   const out: OverlayLine[] = [];
@@ -249,17 +289,32 @@ export function buildPriceOverlays(
     const style = ind.style ?? {};
     const width = style.lineWidth ?? 1;
 
-    if (ind.type === "SMA" || ind.type === "EMA") {
+    if (ind.type === "VWAP") {
+      // VWAP es intradía: en diario/semanal/mensual no se dibuja.
+      if (!intraday) continue;
+      const points = toChartPoints(calculateVWAP(allBars), visibleFromMs);
+      // Sin volumen util / sin puntos visibles -> no se dibuja nada.
+      if (points.length === 0) continue;
+      out.push({
+        id: ind.id,
+        color: style.color ?? "#06b6d4",
+        lineWidth: width,
+        points,
+      });
+    } else if (ind.type === "SMA" || ind.type === "EMA") {
       const calc = ind.type === "SMA" ? calculateSMA : calculateEMA;
-      const points = calc(allBars, {
+      const raw = calc(allBars, {
         period: num(ind.params, "period", 20),
         source: src(ind.params),
       });
+      const points = toChartPoints(raw, visibleFromMs);
+      // Historico insuficiente (p. ej. EMA 200 con pocas velas) -> sin overlay.
+      if (points.length === 0) continue;
       out.push({
         id: ind.id,
         color: style.color ?? "#888888",
         lineWidth: width,
-        points: toChartPoints(points, visibleFromMs),
+        points,
       });
     } else if (ind.type === "BBANDS") {
       const bb = calculateBollingerBands(allBars, {
@@ -389,6 +444,23 @@ export function findIndicator(
 
 export function isVolumeEnabled(indicators: GlobalIndicatorConfig[]): boolean {
   return indicators.some((i) => i.type === "VOLUME" && i.visible);
+}
+
+/**
+ * Notas informativas POR PANEL sobre indicadores activos que NO se dibujan en
+ * ese panel (para que el usuario no crea que "no funcionan"). Hoy: VWAP es solo
+ * intradía, así que en diario/semanal/mensual se anota en vez de pintarse.
+ * Puro y testeable; no afecta el cálculo.
+ */
+export function indicatorPanelNotes(
+  indicators: GlobalIndicatorConfig[],
+  intraday: boolean
+): string[] {
+  const notes: string[] = [];
+  if (!intraday && indicators.some((i) => i.type === "VWAP" && i.visible)) {
+    notes.push("VWAP: solo intradía");
+  }
+  return notes;
 }
 
 export interface VolumeStyle {

@@ -107,6 +107,41 @@ describe("chartWorkspaceStore", () => {
     expect(s.workspacesBySymbol.AAPL[0].chartSlots[0].interval).toBe("1h");
   });
 
+  it("applyChartSlots reemplaza los seis slots y devuelve los saneados", async () => {
+    useChartWorkspaceStore.setState({ workspacesBySymbol: { AAPL: [ws(1, "A")] } });
+    const six = [
+      { slotId: "chart_1", range: "1Y", interval: "1h" },
+      { slotId: "chart_2", range: "1Y", interval: "1d" },
+      { slotId: "chart_3", range: "6M", interval: "1d" },
+      { slotId: "chart_4", range: "3M", interval: "1d" },
+      { slotId: "chart_5", range: "1M", interval: "1h" },
+      { slotId: "chart_6", range: "1W", interval: "30m" },
+    ];
+    const updated = { ...ws(1, "A"), chartSlots: six } as ChartWorkspace;
+    api.updateChartSlots.mockResolvedValue(updated);
+    const result = await useChartWorkspaceStore
+      .getState()
+      .applyChartSlots("AAPL", 1, six as ChartWorkspace["chartSlots"]);
+    // Envia los SEIS slots al backend.
+    expect(api.updateChartSlots).toHaveBeenCalledWith(
+      1,
+      six.map((s) => ({ slotId: s.slotId, range: s.range, interval: s.interval }))
+    );
+    expect(result?.[0].interval).toBe("1h");
+    const s = useChartWorkspaceStore.getState();
+    expect(s.workspacesBySymbol.AAPL[0].chartSlots).toHaveLength(6);
+  });
+
+  it("applyChartSlots devuelve null y setea error si el backend falla", async () => {
+    useChartWorkspaceStore.setState({ workspacesBySymbol: { AAPL: [ws(1, "A")] } });
+    api.updateChartSlots.mockRejectedValue(new Error("boom"));
+    const result = await useChartWorkspaceStore
+      .getState()
+      .applyChartSlots("AAPL", 1, [] as ChartWorkspace["chartSlots"]);
+    expect(result).toBeNull();
+    expect(useChartWorkspaceStore.getState().error).toBe("boom");
+  });
+
   it("deleteWorkspace recarga y reasigna el activo", async () => {
     useChartWorkspaceStore.setState({
       workspacesBySymbol: { AAPL: [ws(1, "A", true), ws(2, "B")] },

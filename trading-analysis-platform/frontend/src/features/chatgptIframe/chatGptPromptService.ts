@@ -248,7 +248,10 @@ export function buildChatGptPrompt(
       if (v.sma50 != null) lines.push(`- SMA 50: ${fmt(v.sma50)}${vsPrice(price, v.sma50)}`);
       if (v.sma200 != null) lines.push(`- SMA 200: ${fmt(v.sma200)}${vsPrice(price, v.sma200)}`);
       if (v.ema9 != null) lines.push(`- EMA 9: ${fmt(v.ema9)}${vsPrice(price, v.ema9)}`);
+      if (v.ema20 != null) lines.push(`- EMA 20: ${fmt(v.ema20)}${vsPrice(price, v.ema20)}`);
       if (v.ema21 != null) lines.push(`- EMA 21: ${fmt(v.ema21)}${vsPrice(price, v.ema21)}`);
+      if (v.ema50 != null) lines.push(`- EMA 50: ${fmt(v.ema50)}${vsPrice(price, v.ema50)}`);
+      if (v.ema200 != null) lines.push(`- EMA 200: ${fmt(v.ema200)}${vsPrice(price, v.ema200)}`);
       if (v.rsi14 != null) lines.push(`- RSI 14: ${fmt(v.rsi14)}`);
       if (v.macd != null) {
         lines.push(

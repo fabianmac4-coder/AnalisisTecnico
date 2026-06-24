@@ -28,15 +28,23 @@ define su contraseña mediante un **enlace enviado por correo**.
   **color por temporalidad** (color picker) y borrado por temporalidad (con
   confirmación). Persistido.
 - 📈 Indicadores **globales** aplicados a las seis gráficas, cada panel
-  calculado con SUS propias velas: SMA 20/50/200, EMA 9/21, **Bollinger Bands**,
+  calculado con SUS propias velas: SMA 20/50/200, **EMA 9/20/50/200** (colores
+  sugeridos: EMA 9 amarillo, EMA 20 azul, EMA 50 morado, EMA 200 rojo),
+  **VWAP** (precio medio ponderado por volumen, cian), **Bollinger Bands**,
   **Volumen** (histograma con escala propia), **RSI** (panel inferior con
   niveles 70/50/30) y **MACD** (línea, señal e histograma ±). Todos con
   **parámetros editables** (popover "ƒ Indicadores" → ⚙: periodo, fuente
   close/open/high/low/hl2/hlc3/ohlc4, colores, stdDev, niveles RSI, periodos
-  MACD con validación fast<slow) y persistidos. Para que SMA 200 y similares
+  MACD con validación fast<slow) y persistidos. Para que SMA/EMA 200 y similares
   salgan completos, el backend entrega **velas de warmup**
   (`includeWarmup=true&warmupBars=N`) separadas de las visibles: se usan solo
   para calcular, nunca se pintan como candles.
+  - **VWAP** = Σ(precio típico × volumen) / Σ(volumen), con precio típico
+    `(high+low+close)/3` y **reinicio de sesión diaria** (acumulación por día
+    UTC). Es **solo intradía**: en gráficas diarias/semanales/mensuales no se
+    dibuja. Tolera barras con volumen cero o ausente sin romper el cálculo.
+  - **EMA 200** necesita suficiente histórico; si no hay barras suficientes, no
+    se dibuja (no inventa valores) en lugar de fallar.
 - 🌙 Tema oscuro tipo terminal de trading.
 - 🧩 Tolerancia a fallos parciales: si una gráfica falla, las demás siguen.
 - 🔐 **Autenticación JWT** (login por usuario o email), datos **por usuario**
@@ -95,6 +103,34 @@ El dashboard mantiene **seis paneles de gráfica**, pero cada panel es
   conserva los datos previos en lugar de romperse. Los selectores deshabilitan
   las combinaciones inválidas. Endpoint: `GET
   /api/market/candles?symbol=AAPL&range=1Y&interval=1d`.
+
+### Plantilla de gráficas por defecto (por usuario)
+
+El menú **"Plantilla ▾"** (barra superior del dashboard, junto a *Aplicar a
+todas*) gestiona la **plantilla de las seis gráficas** que se usa para análisis
+nuevos. Es una **preferencia por usuario** (no por navegador): se guarda en SQL
+(`dbo.C092`, clave `DEFAULT_CHART_LAYOUT_TEMPLATE`), acotada por `C005Id`.
+
+- **Guardar como plantilla predeterminada**: toma los seis rangos/intervalos del
+  análisis ACTIVO y los guarda como tu plantilla. A partir de ahí, **los stocks
+  abiertos por primera vez** y **los workspaces creados desde cero** usan esa
+  plantilla. Si nunca guardas una, se usa el **default del sistema** (5Y/1wk,
+  1Y/1d, 6M/1d, 3M/1d, 1M/1h, 1W/30m).
+- **No reescribe lo existente**: cambiar la plantilla **no** toca los workspaces
+  ya creados. **Duplicar** un workspace sigue copiando los slots del workspace de
+  origen (no la plantilla).
+- **Aplicar plantilla a este análisis**: con confirmación (*"Esto cambiará las
+  seis gráficas de este análisis. Los dibujos se mantendrán."*) reemplaza los
+  seis slots del workspace activo por los de la plantilla y recarga las gráficas.
+  Los dibujos del workspace **se conservan**.
+- **Restablecer plantilla del sistema**: borra tu plantilla guardada y vuelve al
+  default del sistema (no afecta workspaces existentes).
+- **Backend** (`/api/user-preferences/default-chart-layout-template`, auth,
+  acotado por `C005Id`): `GET` devuelve la plantilla efectiva
+  (`{chartSlots, isUserTemplate}`), `POST` valida (exactamente seis slots con ids
+  `chart_1..chart_6` y combinaciones rango/intervalo soportadas; `422` si no) y
+  guarda, `DELETE` restablece el default. El hard-delete de usuario también borra
+  sus filas `C092`.
 
 ## Stock Scorecard (resumen ejecutivo por acción)
 
@@ -301,6 +337,10 @@ Los scripts de `backend/sql/` son **idempotentes** (se pueden re-ejecutar):
 - `014_portfolios.sql` — crea `dbo.C090` (portafolios, FK `FK_C090_C005`) y
   `dbo.C091` (posiciones, FKs `FK_C091_C090`/`FK_C091_C005`/`FK_C091_C010`) para
   **Portfolio Analysis**.
+- `015_user_preferences.sql` — crea `dbo.C092` (preferencias de usuario
+  clave/valor JSON, FK `FK_C092_C005`; índice único filtrado de una fila activa
+  por `C005Id`+`ClavePreferencia`) usada por la **plantilla de gráficas por
+  defecto** (`DEFAULT_CHART_LAYOUT_TEMPLATE`).
 
 ```powershell
 cd backend

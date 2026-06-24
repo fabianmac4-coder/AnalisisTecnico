@@ -8,6 +8,7 @@ import {
   calculateVolume,
   calculateRSI,
   calculateMACD,
+  calculateVWAP,
 } from "./indicatorCalculations";
 import type { Candle } from "@/features/charting/chartEngine/ChartEngineAdapter";
 
@@ -53,6 +54,55 @@ describe("calculateEMA", () => {
 
   it("sin datos suficientes -> vacio", () => {
     expect(calculateEMA(bars([1, 2]), { period: 3 })).toEqual([]);
+  });
+
+  it("soporta periodos 9/20/50/200 (insuficientes -> vacio, no crashea)", () => {
+    expect(calculateEMA(bars(Array(8).fill(1)), { period: 9 })).toEqual([]);
+    expect(calculateEMA(bars(Array(9).fill(5)), { period: 9 })[0]).toEqual({
+      time: 9000,
+      value: 5,
+    });
+    expect(calculateEMA(bars(Array(199).fill(1)), { period: 200 })).toEqual([]); // EMA200 necesita historia
+    expect(calculateEMA(bars(Array(200).fill(3)), { period: 200 }).length).toBe(1);
+  });
+});
+
+describe("calculateVWAP", () => {
+  const DAY = 86_400_000;
+  function ohlcv(time: number, h: number, l: number, c: number, vol: number): Candle {
+    return { time, open: c, high: h, low: l, close: c, volume: vol };
+  }
+
+  it("acumula por sesión: VWAP = Σ(typical·vol)/Σ(vol)", () => {
+    const out = calculateVWAP([
+      ohlcv(1000, 10, 8, 9, 100), // typical=9
+      ohlcv(2000, 12, 10, 11, 100), // typical=11
+    ]);
+    expect(out[0]).toEqual({ time: 1000, value: 9 });
+    expect(out[1].value).toBeCloseTo(10, 6); // (9*100 + 11*100)/200
+  });
+
+  it("RESETEA cada día UTC", () => {
+    const out = calculateVWAP([
+      ohlcv(1000, 10, 8, 9, 100), // día 0
+      ohlcv(DAY + 1000, 20, 18, 19, 50), // día 1 -> reset
+    ]);
+    expect(out[0].value).toBe(9);
+    expect(out[1].value).toBe(19); // nuevo día: solo esta vela
+  });
+
+  it("volumen 0/ausente no rompe (arrastra el VWAP del día)", () => {
+    const out = calculateVWAP([
+      ohlcv(1000, 10, 8, 9, 100),
+      ohlcv(2000, 12, 10, 11, 0), // vol 0: se arrastra
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[1].value).toBe(9); // arrastrado
+  });
+
+  it("sin volumen al inicio -> no emite hasta tener acumulado", () => {
+    const out = calculateVWAP([ohlcv(1000, 10, 8, 9, 0)]);
+    expect(out).toEqual([]);
   });
 });
 

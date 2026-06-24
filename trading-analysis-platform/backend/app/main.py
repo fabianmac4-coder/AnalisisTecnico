@@ -35,6 +35,7 @@ from app.routers import (  # noqa: E402
     scorecard_config,
     stock_scorecard,
     symbols,
+    user_preferences,
 )
 from app.schemas.market import HealthResponse  # noqa: E402
 from app.security.dependencies import get_current_active_user  # noqa: E402
@@ -98,6 +99,7 @@ app.include_router(symbols.router, prefix=prefix, dependencies=_auth_required)
 app.include_router(catalog.router, prefix=prefix)  # usa el usuario en handlers
 app.include_router(drawings.router, prefix=prefix)
 app.include_router(layouts.router, prefix=prefix)
+app.include_router(user_preferences.router, prefix=prefix)  # preferencias C092 (auth en handler)
 app.include_router(indicators.router, prefix=prefix)
 app.include_router(actions.router, prefix=prefix)
 app.include_router(ai_chat.router, prefix=prefix)  # chat de IA (auth en handlers)

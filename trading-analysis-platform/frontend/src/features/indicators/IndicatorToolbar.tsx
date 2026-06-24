@@ -69,6 +69,11 @@ const FIELDS: Record<IndicatorType, FieldDef[]> = {
     { kind: "color", label: "Hist. +", path: "style.histogramPositiveColor" },
     { kind: "color", label: "Hist. −", path: "style.histogramNegativeColor" },
   ],
+  // VWAP: solo intradía (1m…1h), reset de sesión diaria. Sin periodo editable.
+  VWAP: [
+    { kind: "color", label: "Color", path: "style.color" },
+    { kind: "int", label: "Grosor", path: "style.lineWidth", min: 1, max: 4 },
+  ],
 };
 
 type Draft = { params: Record<string, number | string | boolean>; style: Record<string, string | number> };

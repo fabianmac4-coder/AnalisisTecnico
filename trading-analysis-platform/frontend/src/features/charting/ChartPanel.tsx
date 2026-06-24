@@ -36,6 +36,7 @@ import {
   findIndicator,
   isVolumeEnabled,
   getVolumeStyle,
+  indicatorPanelNotes,
 } from "@/features/indicators/globalIndicators";
 import { MiniIndicatorChart } from "@/features/indicators/MiniIndicatorChart";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -115,11 +116,16 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
   const visibleFromMs = data?.visibleFrom ?? bars[0]?.time ?? 0;
 
   const overlays = useMemo(
-    () => buildPriceOverlays(allBars, visibleFromMs, globalIndicators),
-    [allBars, visibleFromMs, globalIndicators]
+    () => buildPriceOverlays(allBars, visibleFromMs, globalIndicators, intraday),
+    [allBars, visibleFromMs, globalIndicators, intraday]
   );
   const volumeOn = isVolumeEnabled(globalIndicators);
   const volumeStyle = useMemo(() => getVolumeStyle(globalIndicators), [globalIndicators]);
+  // Notas por panel (p. ej. VWAP solo intradía). No afectan el cálculo.
+  const indicatorNotes = useMemo(
+    () => indicatorPanelNotes(globalIndicators, intraday),
+    [globalIndicators, intraday]
+  );
 
   const rsiCfg = findIndicator(globalIndicators, "RSI");
   const macdCfg = findIndicator(globalIndicators, "MACD");
@@ -216,6 +222,16 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
         ) : (
           <span className="text-muted">—</span>
         )}
+        {indicatorNotes.map((note) => (
+          <span
+            key={note}
+            data-testid="indicator-note"
+            className="text-[10px] italic text-muted"
+            title="Este indicador no se dibuja en esta temporalidad"
+          >
+            {note}
+          </span>
+        ))}
       </div>
 
       {/* Cuerpo: grafica o estados */}

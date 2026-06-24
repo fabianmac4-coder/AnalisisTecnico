@@ -24,6 +24,7 @@ from app.models.configuracion_scorecard import ConfiguracionScorecard
 from app.models.market_cache import MarketCache
 from app.models.c090_portafolio import Portafolio
 from app.models.c091_posicion_portafolio import PosicionPortafolio
+from app.models.preferencia_usuario import PreferenciaUsuario
 
 __all__ = [
     "Usuario",
@@ -44,4 +45,5 @@ __all__ = [
     "MarketCache",
     "Portafolio",
     "PosicionPortafolio",
+    "PreferenciaUsuario",
 ]

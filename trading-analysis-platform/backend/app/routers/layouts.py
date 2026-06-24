@@ -24,6 +24,7 @@ from app.database import get_db
 from app.models import Accion, LayoutGrafica, Usuario
 from app.repositories.acciones_repository import AccionesRepository
 from app.repositories.layouts_repository import LayoutsRepository
+from app.routers.user_preferences import load_default_chart_slots
 from app.schemas.layouts import (
     ChartSlotConfig,
     ChartSlotsUpdate,
@@ -112,8 +113,13 @@ def list_stock_workspaces(
     repo = LayoutsRepository(db)
     workspaces = repo.list_workspaces(user.C005Id, accion.C010Id)
     if not workspaces:
+        # Stock abierto por primera vez: usa la PLANTILLA del usuario (o el
+        # default del sistema si no tiene plantilla guardada).
         cfg = default_workspace_configuration(
-            accion.Ticker, accion.C010Id, DEFAULT_WORKSPACE_NAME
+            accion.Ticker,
+            accion.C010Id,
+            DEFAULT_WORKSPACE_NAME,
+            chart_slots=load_default_chart_slots(db, user.C005Id),
         )
         ws = repo.create_workspace(
             user.C005Id, accion.C010Id, DEFAULT_WORKSPACE_NAME, cfg, es_default=True
@@ -136,12 +142,17 @@ def create_stock_workspace(
     is_first = len(existing) == 0
 
     if payload.copyFromC030Id is not None:
+        # Duplicar: copia EXACTA de los slots del workspace origen (no la plantilla).
         source = _owned_workspace(repo, user.C005Id, payload.copyFromC030Id)
         cfg = _parse_config(source)
         cfg["chartSlots"] = normalize_chart_slots(cfg.get("chartSlots"))
     else:
+        # Nuevo desde cero: usa la PLANTILLA del usuario (o el default del sistema).
         cfg = default_workspace_configuration(
-            accion.Ticker, accion.C010Id, payload.name
+            accion.Ticker,
+            accion.C010Id,
+            payload.name,
+            chart_slots=load_default_chart_slots(db, user.C005Id),
         )
     cfg["workspaceName"] = payload.name
     cfg["symbol"] = accion.Ticker

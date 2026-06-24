@@ -5,6 +5,7 @@ import { useStockScorecardStore, selectScorecard } from "@/features/stockScoreca
 import { formatInstrumentDisplayName } from "@/features/symbols/instrumentName";
 import type { ChartType } from "./chartEngine/ChartEngineAdapter";
 import { ChartTimezoneSelector } from "@/features/charts/timezone/ChartTimezoneSelector";
+import { ChartTemplateMenu } from "@/features/charts/ChartTemplateMenu";
 
 const QUICK_TYPES: { type: ChartType; label: string }[] = [
   { type: "candlestick", label: "Velas" },
@@ -43,6 +44,7 @@ export function ChartToolbar({ symbol }: { symbol: string }) {
         </span>
       </div>
       <div className="flex items-center gap-2">
+        <ChartTemplateMenu symbol={symbol} />
         <ChartTimezoneSelector exchangeTimezone={exchangeTimezone} />
         <span className="text-[11px] text-muted">Aplicar a todas:</span>
         {QUICK_TYPES.map((t) => (

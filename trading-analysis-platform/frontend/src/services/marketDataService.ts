@@ -25,6 +25,14 @@ function errMessage(reason: unknown): string {
   return (reason as Error)?.message ?? "Error desconocido";
 }
 
+// Velas de "warmup" (ocultas) que se piden ANTES del rango visible para que los
+// indicadores de periodo largo se calculen completos. La EMA 200 necesita ~200
+// velas solo para empezar y ~3x para estabilizarse; pedimos el maximo que admite
+// el backend (clamp por limites de yfinance, sin fallar) para que EMA/VWAP salgan
+// correctos en las seis graficas. Solo afecta el CALCULO; nunca se pintan como
+// velas ni amplian el rango visible.
+export const INDICATOR_WARMUP_BARS = 600;
+
 export const marketDataService = {
   async getPreset(symbol: string, preset: PresetKey): Promise<OHLCVResponse> {
     return apiClient.getOHLCV(symbol, preset);
@@ -47,7 +55,7 @@ export const marketDataService = {
       PRESET_KEYS.map((preset) =>
         apiClient.getOHLCV(symbol, preset, {
           includeWarmup: true,
-          warmupBars: 260,
+          warmupBars: INDICATOR_WARMUP_BARS,
           forceRefresh,
         })
       )
@@ -73,7 +81,7 @@ export const marketDataService = {
   ): Promise<OHLCVResponse> {
     return apiClient.getCandles(symbol, range, interval, {
       includeWarmup: true,
-      warmupBars: 260,
+      warmupBars: INDICATOR_WARMUP_BARS,
       forceRefresh,
     });
   },
@@ -92,7 +100,7 @@ export const marketDataService = {
       slots.map((s) =>
         apiClient.getCandles(symbol, s.range, s.interval, {
           includeWarmup: true,
-          warmupBars: 260,
+          warmupBars: INDICATOR_WARMUP_BARS,
           forceRefresh,
         })
       )

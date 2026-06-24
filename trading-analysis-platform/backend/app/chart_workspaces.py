@@ -196,17 +196,51 @@ def merge_chart_slots(
     return base
 
 
+# Ids canonicos de las seis graficas + clave de preferencia de la plantilla.
+CHART_SLOT_IDS: list[str] = [s["slotId"] for s in DEFAULT_CHART_SLOTS]
+DEFAULT_CHART_LAYOUT_TEMPLATE_KEY = "DEFAULT_CHART_LAYOUT_TEMPLATE"
+
+
+def validate_template_slots(slots: object) -> str | None:
+    """Valida una plantilla de seis slots (para POST de la plantilla del usuario).
+
+    Devuelve un mensaje de error (es) o None si es valida. Exige exactamente seis
+    slots con ids chart_1..chart_6 y combinaciones rango/intervalo soportadas.
+    """
+    if not isinstance(slots, list) or len(slots) != 6:
+        return "Se requieren exactamente seis gráficas."
+    for i, s in enumerate(slots):
+        if not isinstance(s, dict):
+            return f"La gráfica {i + 1} es inválida."
+        if s.get("slotId") != CHART_SLOT_IDS[i]:
+            return f"El slotId de la gráfica {i + 1} debe ser {CHART_SLOT_IDS[i]}."
+        range_key = str(s.get("range") or "")
+        interval = str(s.get("interval") or "")
+        if not is_valid_range(range_key):
+            return f"Rango inválido en la gráfica {i + 1}: {range_key}."
+        if not is_supported_combo(range_key, interval):
+            return (
+                f"Combinación rango/intervalo inválida en la gráfica {i + 1}: "
+                f"{range_key}/{interval}."
+            )
+    return None
+
+
 def default_workspace_configuration(
-    symbol: str, c010_id: int, name: str
+    symbol: str, c010_id: int, name: str, chart_slots: list[dict] | None = None
 ) -> dict:
-    """Estructura JSON por defecto para un workspace nuevo (seis slots default)."""
+    """Estructura JSON por defecto para un workspace nuevo.
+
+    Si `chart_slots` viene (p. ej. la plantilla del usuario), se usa (saneada);
+    si no, los seis slots default del sistema.
+    """
     return {
         "version": WORKSPACE_CONFIG_VERSION,
         "workspaceType": WORKSPACE_TYPE,
         "workspaceName": name,
         "symbol": symbol,
         "c010Id": c010_id,
-        "chartSlots": [dict(s) for s in DEFAULT_CHART_SLOTS],
+        "chartSlots": normalize_chart_slots(chart_slots),
         "panelSettings": {"showVolume": True, "showIndicators": True},
         "lastOpenedAt": datetime.now(timezone.utc).isoformat(),
     }

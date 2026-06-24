@@ -58,14 +58,16 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
   indicator configs, `C030` layouts/analysis workspaces, `C040` user↔accion catalog, `C050`
   simulated/paper-trade entries, `C060` cached news, `C061` news↔accion links, `C062` market-mover
   snapshots, `C063` snapshot items, `C080` market-intelligence/sentiment/macro cache, `C081` scorecard
-  scoring configs, `C090` portfolios, `C091` portfolio positions, `C110` AI chat conversations,
+  scoring configs, `C090` portfolios, `C091` portfolio positions, `C092` user key/value preferences,
+  `C110` AI chat conversations,
   `C111` AI chat messages. Original tables have NO
   IDENTITY → new IDs come from `next_id()` (`repositories/sql_utils.py`, MAX+1); ONLY the new tables
-  C006/C050/C060-C063/C080/C081/C110/C111 use IDENTITY. `C030` (no IDENTITY) gained `C010Id`
+  C006/C050/C060-C063/C080/C081/C092/C110/C111 use IDENTITY. `C030` (no IDENTITY) gained `C010Id`
   (nullable) + `Activo` via migration `009`; `C0101` gained `C030Id` (nullable, workspace-scoped
   drawings) via migration `010`; `C081` is created by migration `011`; `C050` gained snapshot columns
-  via `012`; `C080` is created by migration `013`. See "Analysis workspaces", "Stock Scorecard" and
-  "Market Intelligence" below.
+  via `012`; `C080` is created by migration `013`; `C090`/`C091` by `014`; `C092` by migration `015`.
+  See "Analysis workspaces", "Stock Scorecard", "Market Intelligence" and "Default chart layout
+  template" below.
 - SQL Server does NOT support `NULLS LAST` — order with a portable
   `case((col.is_(None), 1), else_=0)` instead of `.nullslast()` (SQLite tests accept both, so only
   the real DB catches it).
@@ -132,7 +134,7 @@ so yfinance works. If yfinance returns "SSL certificate problem", that machinery
 - Soft deletes only: users → `Activo=0` + `FechaDesactivacion`; drawings → `Eliminado=1`;
   catalog rows → `Activo=0`; AI conversations → `C110.Activo=0`. No physical DELETEs of user data,
   with ONE deliberate exception: `DELETE /api/admin/users/{id}/hard-delete` (purge test users:
-  children first — C111 (via the user's C110 ids) → C110 → C081 → C091 → C090 →
+  children first — C111 (via the user's C110 ids) → C110 → C081 → C092 → C091 → C090 →
   C050/C006/C0101/C020/C030/C040 — then C005, single transaction — `UsersRepository.hard_delete_user`;
   C091 antes que C090 por la FK; guards: not self, not the last active admin; frontend requires typing
   DELETE).
@@ -311,6 +313,32 @@ have MULTIPLE analysis workspaces (tabs). One `C030` row = one workspace.
 - **AI context**: AI Chat sends an optional `workspace` field (active workspace name + its six slot
   configs) → backend merges it as `activeWorkspace`; the ChatGPT prompt builder appends the same. Only
   the ACTIVE workspace is sent, never inactive ones.
+
+### Default chart layout template (C092, per-user)
+A user-editable TEMPLATE for the six-chart slots applied to NEW analysis only. Stored as a user
+preference in `dbo.C092` (key/value JSON; key `DEFAULT_CHART_LAYOUT_TEMPLATE`), scoped by `C005Id`.
+Migration `015_user_preferences.sql`; model `PreferenciaUsuario`; repo `UserPreferencesRepository`
+(`get_active`/`upsert`/`deactivate`; ONE active row per `C005Id`+`ClavePreferencia` via a filtered
+unique index `WHERE Activo=1`).
+- **Endpoints** (`routers/user_preferences.py`, prefix `/user-preferences`, auth en handler, por
+  `C005Id`): `GET /default-chart-layout-template` → `{chartSlots, isUserTemplate}` (la plantilla del
+  usuario saneada o el default del sistema), `POST` valida con `validate_template_slots` (exactamente
+  seis slots, ids `chart_1..chart_6`, combos range/interval soportados → `422` si no) y hace upsert,
+  `DELETE` desactiva (restablece el default). `load_default_chart_slots(db, user_id)` (mismo módulo)
+  devuelve los slots de la plantilla o `DEFAULT_CHART_SLOTS`; NUNCA lanza.
+- **Apply-to-new only**: `layouts.py` pasa `chart_slots=load_default_chart_slots(...)` al crear el
+  workspace en `GET /layouts/stock/{symbol}` (autocreación del primer workspace) y en `POST` SIN
+  `copyFromC030Id`. **Duplicar** (`copyFromC030Id`) copia los slots del workspace ORIGEN, no la
+  plantilla. Cambiar la plantilla NO reescribe workspaces existentes. `chart_workspaces.py` exporta
+  `CHART_SLOT_IDS`, `DEFAULT_CHART_LAYOUT_TEMPLATE_KEY`, `validate_template_slots` y
+  `default_workspace_configuration(..., chart_slots=None)`.
+- **Hard-delete**: `hard_delete_user` borra también las filas C092 del usuario (en el loop, tras C081).
+- **Frontend** (`features/charts/`): `userPreferencesApi.ts` (getTemplate/saveTemplate/resetTemplate),
+  `chartWorkspaceStore.applyChartSlots(symbol, c030Id, slots)` (PATCH de los SEIS slots → devuelve los
+  saneados para recargar), y `ChartTemplateMenu.tsx` (botón **Plantilla ▾** en `ChartToolbar`):
+  Guardar como plantilla predeterminada (envía los seis slots del workspace activo), Aplicar plantilla
+  a este análisis (modal de confirmación → `applyChartSlots` + `chartStore.loadWorkspaceSlots`; los
+  dibujos se mantienen), Restablecer plantilla del sistema. Etiquetas en español.
 
 ### Stock Scorecard (heurística, NO asesoría financiera)
 Resumen ejecutivo por acción: `GET /api/stocks/{symbol}/scorecard` (auth; query `forceRefresh`,
@@ -604,6 +632,15 @@ computes indicators from ITS OWN bars (RSI 14 on 4Y_1W = 14 weekly bars) — nev
 across charts. Pure math lives in `indicatorCalculations.ts` (bar-based `calculate*` functions, ms
 in/out); seconds conversion happens only in the `build*` functions. RSI is Wilder smoothing with
 100/0/50 edge cases; MACD requires fast < slow (`validateIndicatorParams`).
+- Price overlays include SMA, **EMA 9/20/50/200** (default colors: 9 yellow `#eab308`, 20 blue
+  `#3b82f6`, 50 purple `#a855f7`, 200 red `#ef4444`), Bollinger and **VWAP** (`type:"VWAP"`, cyan
+  `#06b6d4`). `buildPriceOverlays(allBars, visibleFromMs, indicators, intraday)` takes an `intraday`
+  flag (true only for intraday intervals); VWAP is skipped (`continue`) when `!intraday` so it never
+  draws on daily/weekly/monthly. EMA 200 with insufficient history yields `[]` (no fake values).
+- `calculateVWAP(bars)` = cumulative Σ(typicalPrice·volume)/Σ(volume), typical `(h+l+c)/3`, **daily
+  UTC session reset** (`Math.floor(time / 86_400_000)`); bars with zero/missing volume carry the
+  previous VWAP when cumV>0 (else skip) — never divides by zero. AI/ChatGPT contexts add EMA
+  20/50/200 (snapshot once; `ai_context_service._indicator_values`, `chatGptPromptService`).
 
 ### State & persistence
 Zustand stores: `chartStore` (per-SLOT OHLCV + quote per symbol; legacy per-preset fields kept for

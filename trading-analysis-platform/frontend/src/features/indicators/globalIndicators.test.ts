@@ -7,6 +7,7 @@ import {
   validateIndicatorParams,
   isVolumeEnabled,
   getVolumeStyle,
+  indicatorPanelNotes,
   DEFAULT_GLOBAL_INDICATORS,
   type GlobalIndicatorConfig,
 } from "./globalIndicators";
@@ -38,6 +39,47 @@ function cfg(partial: Partial<GlobalIndicatorConfig>): GlobalIndicatorConfig {
 
 const SMA3 = cfg({ id: "sma-3", type: "SMA", params: { period: 3 }, style: { color: "#fff" } });
 
+describe("indicadores por defecto (EMA 9/20/21/50/200 + VWAP)", () => {
+  it("incluye EMA 9/20/21/50/200 y VWAP", () => {
+    const ids = DEFAULT_GLOBAL_INDICATORS.map((i) => i.id);
+    for (const id of ["ema-9", "ema-20", "ema-21", "ema-50", "ema-200", "vwap"]) {
+      expect(ids, id).toContain(id);
+    }
+    expect(DEFAULT_GLOBAL_INDICATORS.find((i) => i.id === "vwap")?.type).toBe("VWAP");
+  });
+
+  it("todos los EMA/VWAP son globales (applyToAllTimeframes) => se aplican a las seis", () => {
+    const ids = ["ema-9", "ema-20", "ema-21", "ema-50", "ema-200", "vwap"];
+    for (const id of ids) {
+      const ind = DEFAULT_GLOBAL_INDICATORS.find((i) => i.id === id)!;
+      expect(ind.applyToAllTimeframes, id).toBe(true);
+    }
+  });
+
+  it("EMA 21 y EMA 50 tienen colores distintos (no se confunden)", () => {
+    const ema21 = DEFAULT_GLOBAL_INDICATORS.find((i) => i.id === "ema-21")!;
+    const ema50 = DEFAULT_GLOBAL_INDICATORS.find((i) => i.id === "ema-50")!;
+    expect(ema21.style.color).not.toBe(ema50.style.color);
+  });
+});
+
+describe("indicatorPanelNotes", () => {
+  const vwapOn = cfg({ id: "vwap", type: "VWAP", visible: true });
+  const vwapOff = cfg({ id: "vwap", type: "VWAP", visible: false });
+
+  it("VWAP activo en panel NO intradía => nota 'solo intradía'", () => {
+    expect(indicatorPanelNotes([vwapOn], false)).toContain("VWAP: solo intradía");
+  });
+
+  it("VWAP activo en panel intradía => sin nota (se dibuja)", () => {
+    expect(indicatorPanelNotes([vwapOn], true)).toEqual([]);
+  });
+
+  it("VWAP inactivo => sin nota", () => {
+    expect(indicatorPanelNotes([vwapOff], false)).toEqual([]);
+  });
+});
+
 describe("buildPriceOverlays", () => {
   it("SMA activa produce una linea overlay", () => {
     const out = buildPriceOverlays(bars([1, 2, 3, 4, 5]), 0, [SMA3]);
@@ -54,6 +96,32 @@ describe("buildPriceOverlays", () => {
     // hay valor YA desde la primera vela visible.
     expect(out[0].points).toHaveLength(2);
     expect(out[0].points[0].time).toBe(4); // segundos
+  });
+
+  it("VWAP solo se dibuja en intradía (intraday=true)", () => {
+    const vwap = cfg({ id: "vwap", type: "VWAP", visible: true, style: { color: "#06b6d4" } });
+    const allBars = bars([10, 11, 12]);
+    expect(buildPriceOverlays(allBars, 0, [vwap], true).find((o) => o.id === "vwap")).toBeTruthy();
+    // En diario/superior (intraday=false) NO se dibuja.
+    expect(buildPriceOverlays(allBars, 0, [vwap], false).find((o) => o.id === "vwap")).toBeUndefined();
+  });
+
+  it("EMA 200 con datos insuficientes no produce overlay (no crashea)", () => {
+    const ema200 = cfg({ id: "ema-200", type: "EMA", visible: true, params: { period: 200 } });
+    expect(buildPriceOverlays(bars([1, 2, 3]), 0, [ema200])).toEqual([]);
+  });
+
+  it("EMA 200 SÍ se dibuja con rango visible corto si el lookback (warmup) alcanza", () => {
+    // 210 velas de warmup + 5 visibles. La EMA 200 empieza en el índice 199, así
+    // que las cinco velas visibles (índices 210..214) ya tienen EMA 200 definida.
+    const closes = Array.from({ length: 215 }, (_, i) => 100 + i);
+    const all = bars(closes); // times 1000, 2000, ...
+    const visibleFrom = all[210].time; // solo 5 velas visibles
+    const ema200 = cfg({ id: "ema-200", type: "EMA", visible: true, params: { period: 200 } });
+    const out = buildPriceOverlays(all, visibleFrom, [ema200]);
+    expect(out).toHaveLength(1);
+    // Las cinco velas visibles tienen valor EMA 200 pese a verse < 200 velas.
+    expect(out[0].points.length).toBe(5);
   });
 
   it("indicadores distintos por datos del panel (no se comparte el calculo)", () => {

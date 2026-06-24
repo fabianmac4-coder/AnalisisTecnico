@@ -3,6 +3,7 @@ import { chartWorkspaceApi } from "./chartWorkspaceApi";
 import {
   type CandleInterval,
   type ChartRange,
+  type ChartSlotConfig,
   type ChartWorkspace,
 } from "./chartWorkspaceTypes";
 
@@ -67,6 +68,16 @@ interface ChartWorkspaceState {
     range: ChartRange,
     interval: CandleInterval
   ) => Promise<void>;
+  /**
+   * Reemplaza los SEIS slots del workspace (p. ej. al aplicar la plantilla por
+   * defecto). Devuelve los slots saneados resultantes para que el llamador
+   * recargue los datos de las graficas. NUNCA toca dibujos/indicadores.
+   */
+  applyChartSlots: (
+    symbol: string,
+    c030Id: number,
+    slots: ChartSlotConfig[]
+  ) => Promise<ChartSlotConfig[] | null>;
 }
 
 function upsertWorkspace(
@@ -202,6 +213,31 @@ export const useChartWorkspaceStore = create<ChartWorkspaceState>((set, get) => 
       });
     } catch (err) {
       set({ saving: false, error: (err as Error).message });
+    }
+  },
+
+  async applyChartSlots(symbol, c030Id, slots) {
+    symbol = symbol.toUpperCase();
+    set({ saving: true, error: null });
+    try {
+      // Envia los SEIS slots; el backend mergea por slotId (reemplaza todos).
+      const ws = await chartWorkspaceApi.updateChartSlots(
+        c030Id,
+        slots.map((s) => ({
+          slotId: s.slotId,
+          range: s.range,
+          interval: s.interval,
+        }))
+      );
+      const list = upsertWorkspace(get().workspacesBySymbol[symbol] ?? [], ws);
+      set({
+        workspacesBySymbol: { ...get().workspacesBySymbol, [symbol]: list },
+        saving: false,
+      });
+      return ws.chartSlots;
+    } catch (err) {
+      set({ saving: false, error: (err as Error).message });
+      return null;
     }
   },
 }));

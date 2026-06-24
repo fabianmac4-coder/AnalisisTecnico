@@ -16,6 +16,7 @@ from app.models import (
     PasswordToken,
     PosicionPortafolio,
     Portafolio,
+    PreferenciaUsuario,
     Usuario,
 )
 from app.repositories.sql_utils import next_id, utcnow
@@ -122,6 +123,7 @@ class UsersRepository:
         for model in (
             ChatConversacion,
             ConfiguracionScorecard,
+            PreferenciaUsuario,
             PosicionPortafolio,
             Portafolio,
             OperacionSimulada,

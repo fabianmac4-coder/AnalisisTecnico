@@ -274,6 +274,41 @@ export function calculateRSI(
   return out;
 }
 
+/**
+ * VWAP (Volume Weighted Average Price) con RESET de SESIÓN DIARIA. Pensado para
+ * temporalidades intradía: cada día UTC reinicia el acumulado.
+ *   typicalPrice = (high + low + close) / 3
+ *   VWAP = Σ(typicalPrice·volumen) / Σ(volumen)   (acumulado en el día)
+ * Velas sin volumen (null/0): no aportan; arrastran el VWAP previo del día (o se
+ * omiten si aún no hay acumulado). Nunca lanza.
+ */
+export function calculateVWAP(bars: Candle[]): ValuePoint[] {
+  const out: ValuePoint[] = [];
+  let cumPV = 0;
+  let cumV = 0;
+  let currentDay = NaN;
+  for (const b of bars) {
+    const day = Math.floor(b.time / 86_400_000); // día UTC (reset de sesión)
+    if (day !== currentDay) {
+      cumPV = 0;
+      cumV = 0;
+      currentDay = day;
+    }
+    const vol = b.volume;
+    if (vol == null || !Number.isFinite(vol) || vol <= 0) {
+      // Sin volumen: no rompe; arrastra el VWAP del día si ya hay acumulado.
+      if (cumV > 0) out.push({ time: b.time, value: cumPV / cumV });
+      continue;
+    }
+    const typical = (b.high + b.low + b.close) / 3;
+    cumPV += typical * vol;
+    cumV += vol;
+    const v = cumPV / cumV;
+    if (Number.isFinite(v)) out.push({ time: b.time, value: v });
+  }
+  return out;
+}
+
 export interface MacdSeriesPoint {
   time: number;
   macd: number;
