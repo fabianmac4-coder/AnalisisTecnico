@@ -1,0 +1,604 @@
+{
+  "generatedAt": "2026-06-23T20:35:34-06:00",
+  "project": "Terminal Financiero IA (Trading Analysis Platform)",
+  "database": "AnalisisTecnico",
+  "schema": "dbo",
+  "warning": "Estructura realmente implementada (migraciones backend/sql/*.sql + modelos ORM + codigo de hard-delete). Las tablas originales (C005, C010, C0101, C020, C030, C040) pre-existen en SQL Server: sus tipos provienen del mapeo ORM (String(n) -> VARCHAR(n), podria ser NVARCHAR en la base real). Confirmar con el script de introspeccion si se requiere exactitud.",
+  "tables": [
+    {
+      "physicalName": "C005",
+      "documentationName": "C005-Usuarios",
+      "identity": false,
+      "source": "modelo/codigo (tabla pre-existente) + migracion 001",
+      "purpose": "Usuarios de la aplicacion: identidad de autenticacion, email, rol admin, estado activo y bandera de cambio de password.",
+      "columns": [
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "PK (sin IDENTITY; MAX+1)." },
+        { "name": "NombreUsuario", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Nombre de usuario para login." },
+        { "name": "PasswordHash", "dataType": "VARCHAR(255)", "nullable": false, "default": null, "description": "Hash bcrypt; nunca sale de la API." },
+        { "name": "Email", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Email (NOT NULL en la tabla real)." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": null, "description": "Estado activo (0 = desactivado)." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Alta (la fija la app)." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Ultima modificacion (la fija la app)." },
+        { "name": "NombreNormalizado", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Calculada persistida UPPER(TRIM(NombreUsuario)). No escribir." },
+        { "name": "EsAdmin", "dataType": "BIT", "nullable": false, "default": "0", "description": "1 = administrador (migracion 001)." },
+        { "name": "DebeCambiarPassword", "dataType": "BIT", "nullable": false, "default": "1", "description": "Fuerza cambio de password en proximo login (migracion 001)." },
+        { "name": "UltimoAcceso", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Ultimo login exitoso (migracion 001)." },
+        { "name": "FechaDesactivacion", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Momento de desactivacion (migracion 001)." }
+      ],
+      "primaryKey": ["C005Id"],
+      "foreignKeys": [],
+      "indexes": [
+        { "name": "UQ_C005_NombreNormalizado", "columns": ["NombreNormalizado"], "unique": true },
+        { "name": "UQ_C005_Email", "columns": ["Email"], "unique": true, "filter": "Email IS NOT NULL" }
+      ],
+      "notes": [
+        "Tabla raiz del aislamiento por usuario.",
+        "Borrado normal = suave (Activo=0 + FechaDesactivacion); hard-delete es la unica excepcion."
+      ]
+    },
+    {
+      "physicalName": "C006",
+      "documentationName": "C006-TokensPassword",
+      "identity": true,
+      "source": "migracion 002",
+      "purpose": "Tokens de un solo uso para set/reset de password. Solo se guarda el hash del token.",
+      "columns": [
+        { "name": "C006Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "TokenHash", "dataType": "VARCHAR(255)", "nullable": false, "default": null, "description": "HMAC-SHA256 del token." },
+        { "name": "TipoToken", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "SET_PASSWORD | RESET_PASSWORD." },
+        { "name": "Usado", "dataType": "BIT", "nullable": false, "default": "0", "description": "1 cuando se consumio." },
+        { "name": "FechaExpiracion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Expira (SET=24h, RESET=1h)." },
+        { "name": "FechaUso", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Momento de uso." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Emision." }
+      ],
+      "primaryKey": ["C006Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C006_C005" }
+      ],
+      "indexes": [
+        { "name": "IX_C006_C005Id", "columns": ["C005Id"], "unique": false },
+        { "name": "IX_C006_TokenHash", "columns": ["TokenHash"], "unique": false }
+      ],
+      "notes": ["Tabla privada del usuario. Token de un solo uso."]
+    },
+    {
+      "physicalName": "C010",
+      "documentationName": "C010-Instrumentos",
+      "identity": false,
+      "source": "modelo/codigo (tabla pre-existente) + migracion 001 (indice)",
+      "purpose": "Catalogo maestro COMPARTIDO de instrumentos (acciones/ETF/indices).",
+      "columns": [
+        { "name": "C010Id", "dataType": "INT", "nullable": false, "default": null, "description": "PK (sin IDENTITY; MAX+1)." },
+        { "name": "Ticker", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "Simbolo mostrado." },
+        { "name": "NombreInstrumento", "dataType": "VARCHAR(250)", "nullable": true, "default": null, "description": "Nombre." },
+        { "name": "TipoInstrumento", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "STOCK/ETF/INDEX/etc." },
+        { "name": "Exchange", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Mercado/bolsa." },
+        { "name": "Moneda", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Moneda de cotizacion." },
+        { "name": "Pais", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Pais." },
+        { "name": "Sector", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Sector." },
+        { "name": "Industria", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Industria." },
+        { "name": "FuenteDatos", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Proveedor de datos (yahoo)." },
+        { "name": "TimezoneMercado", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Zona horaria del exchange." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": null, "description": "Estado activo." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Ultima actualizacion." },
+        { "name": "YahooSymbol", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "Simbolo para yfinance (NOT NULL en la tabla real)." },
+        { "name": "TickerNormalizado", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Calculada persistida UPPER(TRIM(Ticker)). No escribir." }
+      ],
+      "primaryKey": ["C010Id"],
+      "foreignKeys": [],
+      "indexes": [
+        { "name": "UQ_C010_TickerFuente", "columns": ["TickerNormalizado", "FuenteDatos"], "unique": true }
+      ],
+      "notes": ["Compartida: no se acota por C005Id. Quitar del watchlist nunca borra C010."]
+    },
+    {
+      "physicalName": "C0101",
+      "documentationName": "C0101-AnalisisDibujos",
+      "identity": false,
+      "source": "modelo/codigo (tabla pre-existente) + migracion 010",
+      "purpose": "Dibujos de analisis (lineas, trendlines, cajas Long/Short Position) por usuario + accion + workspace.",
+      "columns": [
+        { "name": "C0101Id", "dataType": "INT", "nullable": false, "default": null, "description": "PK (sin IDENTITY; MAX+1)." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "C010Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK a la accion." },
+        { "name": "C030Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK al workspace (NULL = dibujo heredado) (migracion 010)." },
+        { "name": "TipoDibujo", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "free_line/extended_trendline/LONG_POSITION/SHORT_POSITION/etc." },
+        { "name": "TemporalidadOrigen", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "Temporalidad de origen / contextKey." },
+        { "name": "NombreAnalisis", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Nombre opcional." },
+        { "name": "PuntosJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Puntos {time(ms),price} en JSON." },
+        { "name": "EstiloJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Estilo + position opaco de cajas Long/Short." },
+        { "name": "Visible", "dataType": "BIT", "nullable": false, "default": null, "description": "Visibilidad." },
+        { "name": "Bloqueado", "dataType": "BIT", "nullable": false, "default": null, "description": "Bloqueado (PATCH responde 423)." },
+        { "name": "MostrarEnTodasTemporalidades", "dataType": "BIT", "nullable": false, "default": null, "description": "Visible en las seis graficas." },
+        { "name": "TemporalidadesVisiblesJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Lista de temporalidades visibles." },
+        { "name": "Comentario", "dataType": "VARCHAR(500)", "nullable": true, "default": null, "description": "Comentario libre." },
+        { "name": "Version", "dataType": "INT", "nullable": false, "default": null, "description": "Version de migracion del esquema del dibujo." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Ultima edicion." },
+        { "name": "Eliminado", "dataType": "BIT", "nullable": false, "default": null, "description": "Borrado suave (Eliminado=1)." }
+      ],
+      "primaryKey": ["C0101Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id" },
+        { "column": "C030Id", "referencesTable": "C030", "referencesColumn": "C030Id", "constraint": "FK_C0101_C030" }
+      ],
+      "indexes": [
+        { "name": "IX_C0101_C005Id_C010Id_C030Id", "columns": ["C005Id", "C010Id", "C030Id"], "unique": false },
+        { "name": "IX_C0101_C005Id_C010Id_C030Id_TemporalidadOrigen", "columns": ["C005Id", "C010Id", "C030Id", "TemporalidadOrigen"], "unique": false }
+      ],
+      "notes": ["Aislada por workspace (C030Id). Borrado = suave (Eliminado=1)."]
+    },
+    {
+      "physicalName": "C020",
+      "documentationName": "C020-IndicadoresConfiguracion",
+      "identity": false,
+      "source": "modelo/codigo (tabla pre-existente)",
+      "purpose": "Configuracion de indicadores del usuario (RSI/MACD/EMA/VWAP/Bollinger/SMA/Volumen).",
+      "columns": [
+        { "name": "C020Id", "dataType": "INT", "nullable": false, "default": null, "description": "PK (sin IDENTITY; MAX+1)." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "C010Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK a la accion (NULL = config global del usuario)." },
+        { "name": "TipoIndicador", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "SMA/EMA/VWAP/RSI/MACD/BBANDS/VOLUME." },
+        { "name": "NombreIndicador", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Nombre/etiqueta." },
+        { "name": "Visible", "dataType": "BIT", "nullable": false, "default": null, "description": "Activo/visible." },
+        { "name": "AplicarTodasTemporalidades", "dataType": "BIT", "nullable": false, "default": null, "description": "Aplica a las seis graficas." },
+        { "name": "ParametrosJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Parametros en JSON." },
+        { "name": "EstiloJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Estilo en JSON." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C020Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id" }
+      ],
+      "indexes": [],
+      "notes": ["Sin indices declarados en migracion (tabla pre-existente); confirmar en la base real."]
+    },
+    {
+      "physicalName": "C030",
+      "documentationName": "C030-LayoutsGraficas",
+      "identity": false,
+      "source": "modelo/codigo (tabla pre-existente) + migracion 009",
+      "purpose": "Workspaces/layouts de analisis por usuario y accion (seis paneles en ConfiguracionJSON).",
+      "columns": [
+        { "name": "C030Id", "dataType": "INT", "nullable": false, "default": null, "description": "PK (sin IDENTITY; MAX+1)." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "C010Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK a la accion (NULL = layout global heredado) (migracion 009)." },
+        { "name": "NombreLayout", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Nombre del workspace." },
+        { "name": "EsDefault", "dataType": "BIT", "nullable": false, "default": null, "description": "Workspace por defecto de la accion." },
+        { "name": "ConfiguracionJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Seis slots {slotId,range,interval} + ajustes." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave (migracion 009)." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C030Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id", "constraint": "FK_C030_C010" }
+      ],
+      "indexes": [
+        { "name": "IX_C030_C005Id_C010Id", "columns": ["C005Id", "C010Id"], "unique": false }
+      ],
+      "notes": ["get_default_by_user filtra C010Id IS NULL (layout global). No se puede borrar el ultimo workspace de una accion."]
+    },
+    {
+      "physicalName": "C040",
+      "documentationName": "C040-CatalogoUsuarioAcciones",
+      "identity": false,
+      "source": "modelo/codigo (tabla pre-existente) + migracion 001 (indice unico)",
+      "purpose": "Watchlist / instrumentos seguidos por el usuario: favoritos, tags, notas, ultima consulta.",
+      "columns": [
+        { "name": "C040Id", "dataType": "INT", "nullable": false, "default": null, "description": "PK (sin IDENTITY; MAX+1)." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "C010Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK a la accion seguida." },
+        { "name": "Favorito", "dataType": "BIT", "nullable": false, "default": null, "description": "Marca de favorito." },
+        { "name": "TagsJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Etiquetas en JSON." },
+        { "name": "UltimaConsulta", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Ultima vez que se abrio." },
+        { "name": "Notas", "dataType": "VARCHAR(500)", "nullable": true, "default": null, "description": "Notas del usuario." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": null, "description": "Borrado suave (Activo=0)." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C040Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id" }
+      ],
+      "indexes": [
+        { "name": "UQ_C040_UsuarioAccion", "columns": ["C005Id", "C010Id"], "unique": true }
+      ],
+      "notes": ["Quitar del watchlist = Activo=0 solo del usuario actual; nunca borra C010."]
+    },
+    {
+      "physicalName": "C050",
+      "documentationName": "C050-OperacionesSimuladas",
+      "identity": true,
+      "source": "migracion 005 + migracion 012",
+      "purpose": "Entradas simuladas / paper trading (LONG/SHORT, ABIERTA/CERRADA) con snapshot de analisis.",
+      "columns": [
+        { "name": "C050Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "C010Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK a la accion." },
+        { "name": "C030Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK al workspace activo (NULL = heredada) (migracion 012)." },
+        { "name": "TipoOperacion", "dataType": "VARCHAR(30)", "nullable": false, "default": null, "description": "LONG | SHORT." },
+        { "name": "PrecioEntrada", "dataType": "DECIMAL(18,6)", "nullable": false, "default": null, "description": "Precio de entrada." },
+        { "name": "Cantidad", "dataType": "DECIMAL(18,6)", "nullable": true, "default": null, "description": "Cantidad hipotetica." },
+        { "name": "FechaEntrada", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Momento de entrada." },
+        { "name": "TemporalidadOrigen", "dataType": "VARCHAR(30)", "nullable": true, "default": null, "description": "Temporalidad de origen." },
+        { "name": "NombreOperacion", "dataType": "VARCHAR(200)", "nullable": true, "default": null, "description": "Nombre opcional." },
+        { "name": "Notas", "dataType": "VARCHAR(1000)", "nullable": true, "default": null, "description": "Notas." },
+        { "name": "Estado", "dataType": "VARCHAR(30)", "nullable": false, "default": null, "description": "ABIERTA | CERRADA." },
+        { "name": "PrecioSalida", "dataType": "DECIMAL(18,6)", "nullable": true, "default": null, "description": "Precio de salida." },
+        { "name": "FechaSalida", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Fecha de cierre." },
+        { "name": "MotivoSalida", "dataType": "VARCHAR(500)", "nullable": true, "default": null, "description": "Motivo del cierre." },
+        { "name": "Color", "dataType": "VARCHAR(30)", "nullable": true, "default": null, "description": "Color del marcador." },
+        { "name": "Visible", "dataType": "BIT", "nullable": false, "default": "1", "description": "Visibilidad en la grafica." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave (Activo=0 AND Visible=0)." },
+        { "name": "MetadataJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Contexto de clic/vela/grafica (migracion 012)." },
+        { "name": "AnalisisJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Snapshot scorecard/tecnico/canal R/R/tesis (migracion 012)." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C050Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C050_C005" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id", "constraint": "FK_C050_C010" },
+        { "column": "C030Id", "referencesTable": "C030", "referencesColumn": "C030Id", "constraint": "FK_C050_C030" }
+      ],
+      "indexes": [
+        { "name": "IX_C050_C005Id_C010Id", "columns": ["C005Id", "C010Id"], "unique": false },
+        { "name": "IX_C050_C005Id_C010Id_Estado", "columns": ["C005Id", "C010Id", "Estado"], "unique": false },
+        { "name": "IX_C050_C005Id_C010Id_C030Id", "columns": ["C005Id", "C010Id", "C030Id"], "unique": false }
+      ],
+      "notes": ["Las cajas Long/Short Position son dibujos (C0101), no C050."]
+    },
+    {
+      "physicalName": "C060",
+      "documentationName": "C060-Noticias",
+      "identity": true,
+      "source": "migracion 006",
+      "purpose": "Cache COMPARTIDO de noticias financieras de proveedores externos.",
+      "columns": [
+        { "name": "C060Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "Proveedor", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "Proveedor (yahoo/google)." },
+        { "name": "ExternalId", "dataType": "VARCHAR(255)", "nullable": true, "default": null, "description": "Id externo." },
+        { "name": "Titulo", "dataType": "NVARCHAR(500)", "nullable": false, "default": null, "description": "Titular." },
+        { "name": "Resumen", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Resumen." },
+        { "name": "URL", "dataType": "NVARCHAR(1000)", "nullable": false, "default": null, "description": "URL de la noticia." },
+        { "name": "Publisher", "dataType": "VARCHAR(250)", "nullable": true, "default": null, "description": "Editor/medio." },
+        { "name": "ImagenURL", "dataType": "NVARCHAR(1000)", "nullable": true, "default": null, "description": "URL de imagen." },
+        { "name": "Categoria", "dataType": "VARCHAR(100)", "nullable": true, "default": null, "description": "Categoria." },
+        { "name": "Idioma", "dataType": "VARCHAR(20)", "nullable": true, "default": null, "description": "Idioma." },
+        { "name": "Pais", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Pais." },
+        { "name": "FechaPublicacion", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Fecha de publicacion." },
+        { "name": "FechaObtencion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Fecha de captura." },
+        { "name": "RawJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Payload crudo." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Activo en cache." },
+        { "name": "URLHashKey", "dataType": "VARBINARY(32)", "nullable": true, "default": null, "description": "Calculada persistida HASHBYTES('SHA2_256', URL). No mapeada en el ORM." }
+      ],
+      "primaryKey": ["C060Id"],
+      "foreignKeys": [],
+      "indexes": [
+        { "name": "IX_C060_Proveedor", "columns": ["Proveedor"], "unique": false },
+        { "name": "IX_C060_FechaPublicacion", "columns": ["FechaPublicacion"], "unique": false },
+        { "name": "IX_C060_Categoria", "columns": ["Categoria"], "unique": false },
+        { "name": "IX_C060_URL", "columns": ["URLHashKey"], "unique": false }
+      ],
+      "notes": ["Compartida; TTL corto. Dedupe por URL normalizada y luego (Proveedor, ExternalId)."]
+    },
+    {
+      "physicalName": "C061",
+      "documentationName": "C061-NoticiasInstrumentos",
+      "identity": true,
+      "source": "migracion 006",
+      "purpose": "Relacion N:M noticia (C060) <-> instrumento (C010) con score de relevancia.",
+      "columns": [
+        { "name": "C061Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C060Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK a la noticia." },
+        { "name": "C010Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al instrumento." },
+        { "name": "Relevancia", "dataType": "DECIMAL(10,4)", "nullable": true, "default": null, "description": "Score de relevancia." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta del enlace." }
+      ],
+      "primaryKey": ["C061Id"],
+      "foreignKeys": [
+        { "column": "C060Id", "referencesTable": "C060", "referencesColumn": "C060Id", "constraint": "FK_C061_C060" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id", "constraint": "FK_C061_C010" }
+      ],
+      "indexes": [
+        { "name": "IX_C061_C060Id", "columns": ["C060Id"], "unique": false },
+        { "name": "IX_C061_C010Id", "columns": ["C010Id"], "unique": false },
+        { "name": "IX_C061_C010Id_C060Id", "columns": ["C010Id", "C060Id"], "unique": false }
+      ],
+      "notes": ["Compartida (no acotada por usuario). Enlaces creados solo sobre el umbral de relevancia."]
+    },
+    {
+      "physicalName": "C062",
+      "documentationName": "C062-ListasMercado",
+      "identity": true,
+      "source": "migracion 006",
+      "purpose": "Snapshots COMPARTIDOS de listas de market movers.",
+      "columns": [
+        { "name": "C062Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "TipoLista", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "TRENDING | TOP_GAINERS | TOP_LOSERS | MOST_ACTIVE." },
+        { "name": "Proveedor", "dataType": "VARCHAR(50)", "nullable": false, "default": null, "description": "Proveedor (yahoo)." },
+        { "name": "FechaObtencion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Fecha del snapshot." },
+        { "name": "RawJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Payload crudo." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Activo en cache." }
+      ],
+      "primaryKey": ["C062Id"],
+      "foreignKeys": [],
+      "indexes": [
+        { "name": "IX_C062_TipoLista", "columns": ["TipoLista"], "unique": false },
+        { "name": "IX_C062_TipoLista_FechaObtencion", "columns": ["TipoLista", "FechaObtencion"], "unique": false }
+      ],
+      "notes": ["Cache con TTL corto; compartido entre usuarios."]
+    },
+    {
+      "physicalName": "C063",
+      "documentationName": "C063-ListasMercadoDetalle",
+      "identity": true,
+      "source": "migracion 006",
+      "purpose": "Filas de detalle (instrumentos) de cada snapshot de C062.",
+      "columns": [
+        { "name": "C063Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C062Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al snapshot." },
+        { "name": "C010Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK al instrumento (si es conocido)." },
+        { "name": "Ticker", "dataType": "VARCHAR(30)", "nullable": false, "default": null, "description": "Ticker." },
+        { "name": "YahooSymbol", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Simbolo Yahoo." },
+        { "name": "NombreInstrumento", "dataType": "VARCHAR(250)", "nullable": true, "default": null, "description": "Nombre." },
+        { "name": "Precio", "dataType": "DECIMAL(18,6)", "nullable": true, "default": null, "description": "Precio." },
+        { "name": "Cambio", "dataType": "DECIMAL(18,6)", "nullable": true, "default": null, "description": "Cambio." },
+        { "name": "CambioPorcentaje", "dataType": "DECIMAL(18,6)", "nullable": true, "default": null, "description": "Cambio %." },
+        { "name": "Volumen", "dataType": "BIGINT", "nullable": true, "default": null, "description": "Volumen." },
+        { "name": "MarketCap", "dataType": "DECIMAL(28,2)", "nullable": true, "default": null, "description": "Capitalizacion." },
+        { "name": "Ranking", "dataType": "INT", "nullable": true, "default": null, "description": "Posicion en la lista." },
+        { "name": "RawJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Payload crudo de la fila." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." }
+      ],
+      "primaryKey": ["C063Id"],
+      "foreignKeys": [
+        { "column": "C062Id", "referencesTable": "C062", "referencesColumn": "C062Id", "constraint": "FK_C063_C062" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id", "constraint": "FK_C063_C010" }
+      ],
+      "indexes": [
+        { "name": "IX_C063_C062Id", "columns": ["C062Id"], "unique": false },
+        { "name": "IX_C063_Ticker", "columns": ["Ticker"], "unique": false },
+        { "name": "IX_C063_C010Id", "columns": ["C010Id"], "unique": false }
+      ],
+      "notes": ["Compartida; se borra/recrea con cada refresh del snapshot."]
+    },
+    {
+      "physicalName": "C080",
+      "documentationName": "C080-MacroMarketCache",
+      "identity": true,
+      "source": "migracion 013",
+      "purpose": "Cache COMPARTIDO de inteligencia de mercado, sentimiento, macro y proveedores externos (clave/valor JSON con TTL).",
+      "columns": [
+        { "name": "C080Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "TipoDato", "dataType": "VARCHAR(100)", "nullable": false, "default": null, "description": "MARKET_INTELLIGENCE_OVERVIEW/MARKET_SENTIMENT/MACRO_OVERVIEW/etc." },
+        { "name": "Proveedor", "dataType": "VARCHAR(100)", "nullable": false, "default": null, "description": "Proveedor/origen." },
+        { "name": "Clave", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Clave del cache." },
+        { "name": "DataJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Payload del cache." },
+        { "name": "FechaObtencion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Fecha de captura." },
+        { "name": "FechaExpiracion", "dataType": "DATETIME", "nullable": false, "default": null, "description": "Expiracion (TTL)." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Fila activa (store() desactiva previas de la misma clave)." }
+      ],
+      "primaryKey": ["C080Id"],
+      "foreignKeys": [],
+      "indexes": [
+        { "name": "IX_C080_TipoDato", "columns": ["TipoDato"], "unique": false },
+        { "name": "IX_C080_Clave", "columns": ["Clave"], "unique": false },
+        { "name": "IX_C080_FechaExpiracion", "columns": ["FechaExpiracion"], "unique": false }
+      ],
+      "notes": ["Independiente, compartida. No almacena datos de usuario ni secretos."]
+    },
+    {
+      "physicalName": "C081",
+      "documentationName": "C081-ConfiguracionScorecard",
+      "identity": true,
+      "source": "migracion 011",
+      "purpose": "Configuracion del Stock Scorecard por usuario (perfiles: pesos + umbrales).",
+      "columns": [
+        { "name": "C081Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "NombreConfiguracion", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Nombre del perfil." },
+        { "name": "EsDefault", "dataType": "BIT", "nullable": false, "default": "0", "description": "Perfil por defecto del usuario." },
+        { "name": "ConfiguracionJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Pesos + umbrales en JSON." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C081Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C081_C005" }
+      ],
+      "indexes": [
+        { "name": "IX_C081_C005Id", "columns": ["C005Id"], "unique": false }
+      ],
+      "notes": ["Validacion: pesos numericos >= 0 y total = 100 (si no, 422)."]
+    },
+    {
+      "physicalName": "C090",
+      "documentationName": "C090-Portafolios",
+      "identity": true,
+      "source": "migracion 014",
+      "purpose": "Portafolios de inversion del usuario (separado del watchlist).",
+      "columns": [
+        { "name": "C090Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "NombrePortafolio", "dataType": "VARCHAR(200)", "nullable": false, "default": null, "description": "Nombre del portafolio." },
+        { "name": "Descripcion", "dataType": "VARCHAR(1000)", "nullable": true, "default": null, "description": "Descripcion." },
+        { "name": "MonedaBase", "dataType": "VARCHAR(10)", "nullable": false, "default": "USD", "description": "Moneda base." },
+        { "name": "EsDefault", "dataType": "BIT", "nullable": false, "default": "0", "description": "Portafolio por defecto." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C090Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C090_C005" }
+      ],
+      "indexes": [
+        { "name": "IX_C090_C005Id", "columns": ["C005Id"], "unique": false },
+        { "name": "IX_C090_C005Id_Activo", "columns": ["C005Id", "Activo"], "unique": false },
+        { "name": "IX_C090_C005Id_EsDefault", "columns": ["C005Id", "EsDefault"], "unique": false }
+      ],
+      "notes": ["Borrar un portafolio desactiva sus posiciones (C091)."]
+    },
+    {
+      "physicalName": "C091",
+      "documentationName": "C091-PosicionesPortafolio",
+      "identity": true,
+      "source": "migracion 014",
+      "purpose": "Posiciones/holdings de un portafolio. Guarda C005Id (ademas de C090Id) para aislar sin join.",
+      "columns": [
+        { "name": "C091Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C090Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al portafolio." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno (denormalizado)." },
+        { "name": "C010Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK al instrumento (si es conocido)." },
+        { "name": "Ticker", "dataType": "VARCHAR(30)", "nullable": false, "default": null, "description": "Ticker." },
+        { "name": "YahooSymbol", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Simbolo Yahoo." },
+        { "name": "NombreInstrumento", "dataType": "VARCHAR(250)", "nullable": true, "default": null, "description": "Nombre." },
+        { "name": "TipoInstrumento", "dataType": "VARCHAR(50)", "nullable": false, "default": "STOCK", "description": "Tipo de instrumento." },
+        { "name": "Cantidad", "dataType": "DECIMAL(18,6)", "nullable": false, "default": null, "description": "Cantidad (> 0)." },
+        { "name": "PrecioCompraPromedio", "dataType": "DECIMAL(18,6)", "nullable": false, "default": null, "description": "Costo promedio (>= 0)." },
+        { "name": "FechaCompra", "dataType": "DATETIME", "nullable": true, "default": null, "description": "Fecha de compra." },
+        { "name": "Moneda", "dataType": "VARCHAR(10)", "nullable": true, "default": null, "description": "Moneda." },
+        { "name": "Sector", "dataType": "VARCHAR(150)", "nullable": true, "default": null, "description": "Sector." },
+        { "name": "Industria", "dataType": "VARCHAR(150)", "nullable": true, "default": null, "description": "Industria." },
+        { "name": "Notas", "dataType": "VARCHAR(1000)", "nullable": true, "default": null, "description": "Notas." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C091Id"],
+      "foreignKeys": [
+        { "column": "C090Id", "referencesTable": "C090", "referencesColumn": "C090Id", "constraint": "FK_C091_C090" },
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C091_C005" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id", "constraint": "FK_C091_C010" }
+      ],
+      "indexes": [
+        { "name": "IX_C091_C090Id", "columns": ["C090Id"], "unique": false },
+        { "name": "IX_C091_C005Id", "columns": ["C005Id"], "unique": false },
+        { "name": "IX_C091_C090Id_Activo", "columns": ["C090Id", "Activo"], "unique": false },
+        { "name": "IX_C091_C090Id_Ticker", "columns": ["C090Id", "Ticker"], "unique": false },
+        { "name": "IX_C091_C010Id", "columns": ["C010Id"], "unique": false }
+      ],
+      "notes": ["En el hard-delete se borra antes que C090 por la FK."]
+    },
+    {
+      "physicalName": "C092",
+      "documentationName": "C092-PreferenciasUsuario",
+      "identity": true,
+      "source": "migracion 015",
+      "purpose": "Preferencias clave/valor por usuario. Primer uso: DEFAULT_CHART_LAYOUT_TEMPLATE.",
+      "columns": [
+        { "name": "C092Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "ClavePreferencia", "dataType": "VARCHAR(100)", "nullable": false, "default": null, "description": "Clave (ej. DEFAULT_CHART_LAYOUT_TEMPLATE)." },
+        { "name": "ValorJSON", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Valor en JSON." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave (reset al default del sistema)." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C092Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C092_C005" }
+      ],
+      "indexes": [
+        { "name": "IX_C092_C005Id", "columns": ["C005Id"], "unique": false },
+        { "name": "UX_C092_C005Id_Clave_Activo", "columns": ["C005Id", "ClavePreferencia"], "unique": true, "filter": "Activo = 1" }
+      ],
+      "notes": ["Implementada (migracion 015). El hard-delete borra sus filas."]
+    },
+    {
+      "physicalName": "C110",
+      "documentationName": "C110-ChatConversaciones",
+      "identity": true,
+      "source": "migracion 004",
+      "purpose": "Conversaciones del AI Chat por usuario y (opcional) accion/contexto de ticker.",
+      "columns": [
+        { "name": "C110Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C005Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK al usuario dueno." },
+        { "name": "C010Id", "dataType": "INT", "nullable": true, "default": null, "description": "FK a la accion (contexto, opcional)." },
+        { "name": "TituloConversacion", "dataType": "VARCHAR(250)", "nullable": true, "default": null, "description": "Titulo." },
+        { "name": "ContextoTicker", "dataType": "VARCHAR(30)", "nullable": true, "default": null, "description": "Ticker de contexto." },
+        { "name": "ContextoYahooSymbol", "dataType": "VARCHAR(50)", "nullable": true, "default": null, "description": "Simbolo Yahoo de contexto." },
+        { "name": "Modelo", "dataType": "VARCHAR(100)", "nullable": false, "default": null, "description": "Modelo de IA usado." },
+        { "name": "Activo", "dataType": "BIT", "nullable": false, "default": "1", "description": "Borrado suave (Activo=0)." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." },
+        { "name": "FechaActualizacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Ultima actualizacion." }
+      ],
+      "primaryKey": ["C110Id"],
+      "foreignKeys": [
+        { "column": "C005Id", "referencesTable": "C005", "referencesColumn": "C005Id", "constraint": "FK_C110_C005" },
+        { "column": "C010Id", "referencesTable": "C010", "referencesColumn": "C010Id", "constraint": "FK_C110_C010" }
+      ],
+      "indexes": [
+        { "name": "IX_C110_C005Id", "columns": ["C005Id"], "unique": false },
+        { "name": "IX_C110_C010Id", "columns": ["C010Id"], "unique": false },
+        { "name": "IX_C110_C005Id_C010Id", "columns": ["C005Id", "C010Id"], "unique": false }
+      ],
+      "notes": ["Ownership verificado en cada lectura/escritura; acceso cruzado = 404."]
+    },
+    {
+      "physicalName": "C111",
+      "documentationName": "C111-ChatMensajes",
+      "identity": true,
+      "source": "migracion 004",
+      "purpose": "Mensajes dentro de cada conversacion de AI Chat.",
+      "columns": [
+        { "name": "C111Id", "dataType": "INT IDENTITY(1,1)", "nullable": false, "default": null, "description": "PK." },
+        { "name": "C110Id", "dataType": "INT", "nullable": false, "default": null, "description": "FK a la conversacion." },
+        { "name": "Rol", "dataType": "VARCHAR(30)", "nullable": false, "default": null, "description": "system | user | assistant | tool." },
+        { "name": "Contenido", "dataType": "NVARCHAR(MAX)", "nullable": false, "default": null, "description": "Texto del mensaje." },
+        { "name": "MetadataJSON", "dataType": "NVARCHAR(MAX)", "nullable": true, "default": null, "description": "Metadatos opcionales." },
+        { "name": "TokensEntrada", "dataType": "INT", "nullable": true, "default": null, "description": "Tokens de entrada." },
+        { "name": "TokensSalida", "dataType": "INT", "nullable": true, "default": null, "description": "Tokens de salida." },
+        { "name": "FechaCreacion", "dataType": "DATETIME", "nullable": false, "default": "GETDATE()", "description": "Alta." }
+      ],
+      "primaryKey": ["C111Id"],
+      "foreignKeys": [
+        { "column": "C110Id", "referencesTable": "C110", "referencesColumn": "C110Id", "constraint": "FK_C111_C110" }
+      ],
+      "indexes": [
+        { "name": "IX_C111_C110Id", "columns": ["C110Id"], "unique": false },
+        { "name": "IX_C111_C110Id_FechaCreacion", "columns": ["C110Id", "FechaCreacion"], "unique": false }
+      ],
+      "notes": ["Privada del usuario a traves de C110 (no tiene C005Id). En hard-delete se borra primero."]
+    }
+  ],
+  "deprecatedTables": [
+    {
+      "physicalNames": ["C070", "C071", "C072", "C073"],
+      "module": "ROIC.ai",
+      "status": "removida",
+      "removedBy": "migracion 008_remove_roic_module.sql",
+      "note": "Cache de fundamentales, historial de analisis, templates de prompts y log de requests. Eliminadas (DROP FK + DROP TABLE). El scorecard usa solo Yahoo. No deben existir en una base actualizada."
+    }
+  ],
+  "userIsolation": {
+    "privateTables": ["C006", "C0101", "C020", "C030", "C040", "C050", "C081", "C090", "C091", "C092", "C110", "C111"],
+    "sharedTables": ["C010", "C060", "C061", "C062", "C063", "C080"],
+    "note": "C111 es privada a traves de C110 (no tiene C005Id propio). Toda lectura/escritura privada se acota por C005Id; un usuario nunca lee/escribe filas de otro."
+  },
+  "hardDeleteOrder": [
+    { "step": 1, "table": "C111", "where": "C110Id IN (SELECT C110Id FROM C110 WHERE C005Id = @user)" },
+    { "step": 2, "table": "C110", "where": "C005Id = @user" },
+    { "step": 3, "table": "C081", "where": "C005Id = @user" },
+    { "step": 4, "table": "C092", "where": "C005Id = @user" },
+    { "step": 5, "table": "C091", "where": "C005Id = @user" },
+    { "step": 6, "table": "C090", "where": "C005Id = @user" },
+    { "step": 7, "table": "C050", "where": "C005Id = @user" },
+    { "step": 8, "table": "C006", "where": "C005Id = @user" },
+    { "step": 9, "table": "C0101", "where": "C005Id = @user" },
+    { "step": 10, "table": "C020", "where": "C005Id = @user" },
+    { "step": 11, "table": "C030", "where": "C005Id = @user" },
+    { "step": 12, "table": "C040", "where": "C005Id = @user" },
+    { "step": 13, "table": "C005", "where": "C005Id = @user" }
+  ]
+}
