@@ -20,6 +20,12 @@ function uuid(): string {
   );
 }
 
+/** Id LOCAL (uuid) para un dibujo nuevo. El backend asigna el C0101Id real al
+ *  guardar (un id no numérico se trata como "crear" en el repositorio). */
+export function newDrawingId(): string {
+  return uuid();
+}
+
 export interface CreateDrawingParams {
   symbol: string;
   /** Workspace de análisis dueño del dibujo (aislamiento por C030Id). */

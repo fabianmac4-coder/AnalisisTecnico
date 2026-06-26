@@ -40,6 +40,8 @@ import {
 } from "@/features/indicators/globalIndicators";
 import { MiniIndicatorChart } from "@/features/indicators/MiniIndicatorChart";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { useReplayStore } from "@/features/replay/replayStore";
+import { filterBarsToCursor } from "@/features/replay/replayUtils";
 
 interface Props {
   slot: ChartSlotConfig;
@@ -106,14 +108,27 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
     [allDrawings, drawingsVisible, symbol, hiddenOrigins]
   );
 
-  const bars = data?.bars ?? [];
+  // Modo Replay: oculta las velas posteriores al cursor (mismo corte en las seis
+  // gráficas; cada panel filtra por sus propios tiempos). NUNCA muta los datos.
+  const replayEnabled = useReplayStore((s) => s.enabled);
+  const replayCursor = useReplayStore((s) => s.cursorTime);
+  const replaySelecting = useReplayStore((s) => s.selecting);
+  const setReplayCursor = useReplayStore((s) => s.setCursor);
+  const replayActive = replayEnabled && replayCursor != null;
+
+  const fullBars = data?.bars ?? [];
+  const bars = useMemo(
+    () => (replayActive ? filterBarsToCursor(fullBars, replayCursor) : fullBars),
+    [fullBars, replayActive, replayCursor]
+  );
   const last = bars[bars.length - 1];
 
-  const allBars = useMemo(
-    () => [...(data?.warmupBars ?? []), ...bars],
-    [data?.warmupBars, bars]
-  );
-  const visibleFromMs = data?.visibleFrom ?? bars[0]?.time ?? 0;
+  const allBars = useMemo(() => {
+    const warmup = data?.warmupBars ?? [];
+    const w = replayActive ? filterBarsToCursor(warmup, replayCursor) : warmup;
+    return [...w, ...bars];
+  }, [data?.warmupBars, bars, replayActive, replayCursor]);
+  const visibleFromMs = data?.visibleFrom ?? fullBars[0]?.time ?? 0;
 
   const overlays = useMemo(
     () => buildPriceOverlays(allBars, visibleFromMs, globalIndicators, intraday),
@@ -139,12 +154,15 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
     [allBars, visibleFromMs, macdCfg]
   );
 
-  const displayPrice = useMemo(
+  const baseDisplayPrice = useMemo(
     () => resolveDisplayPriceFromSlots(quote, Object.values(chartDataBySlot)),
     [quote, chartDataBySlot]
   );
-  const change = quote?.change ?? null;
-  const changePct = quote?.changePercent ?? null;
+  // En Replay se muestra el precio de la última vela visible (no la cotización
+  // actual) para no filtrar el futuro.
+  const displayPrice = replayActive ? last?.close ?? null : baseDisplayPrice;
+  const change = replayActive ? null : quote?.change ?? null;
+  const changePct = replayActive ? null : quote?.changePercent ?? null;
   const currency = quote?.currency ?? data?.currency;
   const changeClass =
     change == null || change === 0 ? "text-muted" : change > 0 ? "text-up" : "text-down";
@@ -267,9 +285,12 @@ export function ChartPanel({ slot, symbol, c030Id, workspaceName, index, onExpan
             overlays={overlays}
             timeframeColors={timeframeColors}
             canonicalPrice={displayPrice}
-            canonicalChange={quote?.change ?? null}
+            canonicalChange={replayActive ? null : quote?.change ?? null}
             volumeStyle={volumeStyle}
             exchangeTimezone={data?.exchangeTimezone ?? data?.timezone}
+            onChartClick={
+              replayEnabled && replaySelecting ? setReplayCursor : undefined
+            }
           />
         )}
       </div>

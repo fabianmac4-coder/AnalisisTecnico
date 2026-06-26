@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { useDrawingStore } from "@/stores/drawingStore";
 import {
@@ -12,6 +12,10 @@ import { WorkspaceTabBar } from "@/features/charts/WorkspaceTabBar";
 import { DrawingFilterToolbar } from "@/features/drawings/DrawingFilterToolbar";
 import { IndicatorToolbar } from "@/features/indicators/IndicatorToolbar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { useReplayStore } from "@/features/replay/replayStore";
+import { useReplayPlayback } from "@/features/replay/useReplayPlayback";
+import { intervalToMinutes } from "@/features/replay/replayUtils";
+import { useDrawingClipboardKeys } from "@/features/drawings/drawingClipboard";
 
 /** Dashboard 3x2 de los seis slots del workspace activo del simbolo. */
 export function ChartGrid() {
@@ -26,6 +30,36 @@ export function ChartGrid() {
   );
   const loadDrawings = useDrawingStore((s) => s.loadDrawings);
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  // --- Modo Replay ---
+  const slots = activeWorkspace?.chartSlots ?? [];
+  // Temporalidad de REFERENCIA para los pasos del replay: la gráfica maximizada
+  // si hay una; si no, la más fina (menor intervalo) para revelar vela a vela.
+  const finestSlotId = useMemo(() => {
+    if (slots.length === 0) return undefined;
+    return [...slots].sort(
+      (a, b) => intervalToMinutes(a.interval) - intervalToMinutes(b.interval)
+    )[0].slotId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(slots.map((s) => `${s.slotId}:${s.interval}`))]);
+  const referenceSlotId = expanded ?? finestSlotId;
+  const referenceBars = useChartStore((s) =>
+    referenceSlotId ? s.chartDataBySlot[referenceSlotId]?.bars : undefined
+  );
+  const referenceTimes = useMemo(
+    () => (referenceBars ?? []).map((b) => b.time),
+    [referenceBars]
+  );
+  // Temporizador ÚNICO de reproducción (evita timers duplicados).
+  useReplayPlayback(referenceTimes);
+  // Atajos Ctrl/Cmd+C / +V para copiar/pegar el dibujo seleccionado (una vez).
+  useDrawingClipboardKeys(activeSymbol);
+
+  // Replay acotado a la sesión del símbolo: al cambiar de acción se desactiva.
+  useEffect(() => {
+    const st = useReplayStore.getState();
+    if (st.enabled && st.symbol !== activeSymbol) st.disable();
+  }, [activeSymbol]);
 
   // Garantiza que los workspaces del simbolo esten cargados (por si se llega
   // sin pasar por selectSymbol, p.ej. tras un refresh con simbolo activo).
@@ -56,13 +90,12 @@ export function ChartGrid() {
     );
   }
 
-  const slots = activeWorkspace?.chartSlots ?? [];
   const expandedSlot = slots.find((s) => s.slotId === expanded);
 
   return (
     <div className="flex h-full flex-col">
       <WorkspaceTabBar symbol={activeSymbol} />
-      <ChartToolbar symbol={activeSymbol} />
+      <ChartToolbar symbol={activeSymbol} replayReferenceTimes={referenceTimes} />
       <DrawingFilterToolbar c030Id={activeWorkspace?.c030Id} slots={slots} />
       <IndicatorToolbar />
       <div className="grid flex-1 grid-cols-1 gap-2 overflow-auto p-2 md:grid-cols-2 xl:grid-cols-3">
@@ -87,6 +120,8 @@ export function ChartGrid() {
         <ExpandedChartModal
           slot={expandedSlot}
           symbol={activeSymbol}
+          slots={slots}
+          onSelectSlot={setExpanded}
           onClose={() => setExpanded(null)}
         />
       )}

@@ -13,6 +13,12 @@ import { ChannelRiskRewardBadge } from "@/features/channelRiskReward/ChannelRisk
 import { useChannelRiskRewardStore } from "@/features/channelRiskReward/channelRiskRewardStore";
 import { useChartTimezoneStore } from "@/features/charts/timezone/chartTimezoneStore";
 import { formatChartTime } from "@/features/charts/timezone/chartTimezoneUtils";
+import { useChartViewportStore } from "./chartViewportStore";
+import {
+  adjustForNewData,
+  decideViewportAction,
+  viewportKey,
+} from "./chartViewport";
 
 /** Linea de indicador overlay sobre el precio (tiempo en segundos UTC). */
 export interface OverlayLine {
@@ -46,6 +52,12 @@ interface Props {
   volumeStyle?: VolumeOverlayStyle;
   /** Zona horaria del exchange (para las etiquetas de tiempo de esta gráfica). */
   exchangeTimezone?: string | null;
+  /**
+   * Clic en la gráfica (ms UTC de la vela clickeada). OPCIONAL: solo se suscribe
+   * cuando se pasa (p. ej. para "Seleccionar punto de inicio" del Modo Replay).
+   * No interfiere con dibujos cuando es undefined.
+   */
+  onChartClick?: (timeMs: number) => void;
 }
 
 /**
@@ -70,6 +82,7 @@ export function ChartCanvas({
   canonicalChange = null,
   volumeStyle,
   exchangeTimezone = null,
+  onChartClick,
 }: Props) {
   const tzSetting = useChartTimezoneStore((s) => s.setting);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,6 +90,15 @@ export function ChartCanvas({
   const chartIdRef = useRef<string | null>(null);
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const [instance, setInstance] = useState<ChartInstance | null>(null);
+
+  // --- Preservación de zoom/viewport ---
+  // Clave del viewport: workspace + acción + slot + temporalidad (range/interval).
+  const vpKey = viewportKey(c030Id, symbol, slotId, sourceTimeframe);
+  const vpKeyRef = useRef(vpKey);
+  vpKeyRef.current = vpKey; // siempre la clave actual para el callback de zoom
+  const firstLoadRef = useRef(true);
+  const prevKeyRef = useRef(vpKey);
+  const prevTotalRef = useRef(0);
 
   // Whitespace futuro tras el ultimo bar real (habilita dibujar "al futuro").
   const futureTimesMs = useMemo(() => {
@@ -118,12 +140,48 @@ export function ChartCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Datos (velas reales + whitespace futuro, sin OHLC falso).
+  // Datos (velas reales + whitespace futuro, sin OHLC falso). PRESERVA el zoom:
+  // en un refresh (mismo dataset) conserva el rango visible actual; en el primer
+  // load / cambio de range/interval restaura el viewport guardado o ajusta.
   useEffect(() => {
-    if (adapterRef.current && chartIdRef.current) {
-      adapterRef.current.setData(chartIdRef.current, candles, futureTimesMs);
-    }
-  }, [candles, futureTimesMs]);
+    const adapter = adapterRef.current;
+    const chartId = chartIdRef.current;
+    if (!adapter || !chartId) return;
+    const isFirst = firstLoadRef.current;
+    const keyChanged = prevKeyRef.current !== vpKey;
+    const newTotal = candles.length + futureTimesMs.length;
+    // Rango vivo ANTES de actualizar (solo en refresh del mismo dataset).
+    const liveRaw = !isFirst && !keyChanged ? adapter.getLogicalRange(chartId) : null;
+    const live = adjustForNewData(liveRaw, prevTotalRef.current, newTotal);
+
+    adapter.setData(chartId, candles, futureTimesMs); // ya NO ajusta solo
+
+    const saved = useChartViewportStore.getState().getRange(vpKey);
+    const action = decideViewportAction({
+      isFirstLoad: isFirst,
+      keyChanged,
+      liveRange: live,
+      savedRange: saved,
+    });
+    if (action.type === "restore") adapter.setLogicalRange(chartId, action.range);
+    else adapter.fitContent(chartId);
+
+    firstLoadRef.current = false;
+    prevKeyRef.current = vpKey;
+    prevTotalRef.current = newTotal;
+  }, [candles, futureTimesMs, vpKey]);
+
+  // Recuerda el zoom del usuario por clave de viewport (sobrevive a remontajes,
+  // p. ej. al cambiar de gráfica maximizada). No se persiste en SQL.
+  useEffect(() => {
+    const adapter = adapterRef.current;
+    const chartId = chartIdRef.current;
+    if (!instance || !adapter || !chartId) return;
+    return adapter.subscribeLogicalRange(chartId, () => {
+      const r = adapter.getLogicalRange(chartId);
+      if (r) useChartViewportStore.getState().setRange(vpKeyRef.current, r);
+    });
+  }, [instance]);
 
   // Tipo de grafica.
   useEffect(() => {
@@ -231,6 +289,20 @@ export function ChartCanvas({
       series.setData(o.points.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })));
     }
   }, [overlays]);
+
+  // Clic en la gráfica para "Seleccionar punto de inicio" del Replay. Solo se
+  // suscribe si onChartClick viene definido (no interfiere con dibujos).
+  useEffect(() => {
+    if (!onChartClick) return;
+    const api = adapterRef.current?.getChartApi(chartIdRef.current ?? "");
+    if (!api) return;
+    const handler = (param: { time?: unknown }) => {
+      const t = param.time;
+      if (typeof t === "number") onChartClick(t * 1000); // segundos LWC -> ms
+    };
+    api.subscribeClick(handler);
+    return () => api.unsubscribeClick(handler);
+  }, [onChartClick, instance]);
 
   // Grafica ACTIVA: el ultimo panel clickeado decide que canal auto muestra
   // el panel izquierdo de R/R (y el contexto que viaja a la IA).

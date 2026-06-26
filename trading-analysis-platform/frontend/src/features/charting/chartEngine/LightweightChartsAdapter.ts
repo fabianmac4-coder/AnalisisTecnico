@@ -395,7 +395,41 @@ export class LightweightChartsAdapter implements ChartEngineAdapter {
     handle.futureTimesMs = futureTimesMs;
     setMainData(handle.mainSeries, handle.type, bars, futureTimesMs);
     this.refreshVolumeData(handle);
-    handle.chart.timeScale().fitContent();
+    // NO se ajusta automáticamente: el caller (ChartCanvas) decide si conservar
+    // el zoom (refresh) o ajustar (fitContent en el primer load / cambio de TF).
+  }
+
+  /** Ajuste automático del rango visible (solo primer load / "Restablecer zoom"). */
+  fitContent(chartId: string): void {
+    this.handles.get(chartId)?.chart.timeScale().fitContent();
+  }
+
+  /** Rango LÓGICO visible (por índice de barra; robusto al cambiar # de velas). */
+  getLogicalRange(chartId: string): { from: number; to: number } | null {
+    const ts = this.handles.get(chartId)?.chart.timeScale();
+    const r = ts?.getVisibleLogicalRange();
+    return r && r.from != null && r.to != null
+      ? { from: r.from, to: r.to }
+      : null;
+  }
+
+  /** Restaura el rango lógico visible (preservación de zoom). */
+  setLogicalRange(chartId: string, range: { from: number; to: number }): void {
+    const ts = this.handles.get(chartId)?.chart.timeScale();
+    if (!ts) return;
+    try {
+      ts.setVisibleLogicalRange(range);
+    } catch {
+      /* rango inválido tras un cambio de datos: se ignora */
+    }
+  }
+
+  /** Suscribe a cambios del rango lógico (para recordar el zoom del usuario). */
+  subscribeLogicalRange(chartId: string, cb: () => void): () => void {
+    const ts = this.handles.get(chartId)?.chart.timeScale();
+    if (!ts) return () => {};
+    ts.subscribeVisibleLogicalRangeChange(cb);
+    return () => ts.unsubscribeVisibleLogicalRangeChange(cb);
   }
 
   private refreshVolumeData(handle: ChartHandle): void {

@@ -130,7 +130,25 @@ describe("AutoRefreshMenu", () => {
     fireEvent.click(screen.getByTestId("auto-refresh-15"));
     expect(useRefreshStore.getState().autoRefreshIntervalMinutes).toBeNull();
     expect(useRefreshStore.getState().autoRefreshEnabled).toBe(false);
-    expect(screen.getByText("Estado: Off")).toBeTruthy();
+    expect(screen.getByText("Estado: Manual")).toBeTruthy();
+  });
+
+  it("muestra la opción 'Cada 1 minuto' y al elegirla fija el intervalo a 1", () => {
+    render(<AutoRefreshMenu />);
+    fireEvent.click(screen.getByTestId("auto-refresh-button"));
+    expect(screen.getByText("Cada 1 minuto")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("auto-refresh-1"));
+    expect(useRefreshStore.getState().autoRefreshIntervalMinutes).toBe(1);
+    expect((screen.getByTestId("auto-refresh-1") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("la opción Manual desactiva el auto-refresh", () => {
+    useRefreshStore.setState({ autoRefreshIntervalMinutes: 5, autoRefreshEnabled: true });
+    render(<AutoRefreshMenu />);
+    fireEvent.click(screen.getByTestId("auto-refresh-button"));
+    fireEvent.click(screen.getByTestId("auto-refresh-manual"));
+    expect(useRefreshStore.getState().autoRefreshIntervalMinutes).toBeNull();
+    expect(useRefreshStore.getState().autoRefreshEnabled).toBe(false);
   });
 
   it("persiste el intervalo en localStorage", () => {
@@ -152,6 +170,16 @@ describe("useAutoRefresh (timer)", () => {
     render(<HookHost symbol="AAPL" />);
 
     act(() => vi.advanceTimersByTime(5 * 60 * 1000));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("AAPL");
+  });
+
+  it("con 'Cada 1 minuto' dispara el refresh a los 60 segundos", () => {
+    vi.useFakeTimers();
+    const spy = vi.fn().mockResolvedValue(undefined);
+    useRefreshStore.setState({ autoRefreshIntervalMinutes: 1, refreshNow: spy });
+    render(<HookHost symbol="AAPL" />);
+    act(() => vi.advanceTimersByTime(60 * 1000));
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith("AAPL");
   });

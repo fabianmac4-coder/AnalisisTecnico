@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AUTO_REFRESH_OPTIONS } from "./refreshTypes";
+import { AUTO_REFRESH_OPTIONS, autoRefreshOptionLabel } from "./refreshTypes";
 import { useRefreshStore } from "./refreshStore";
 
 function formatTime(iso: string): string {
@@ -53,8 +53,19 @@ export function AutoRefreshMenu() {
           className="absolute right-0 top-8 z-50 w-48 rounded border border-edge bg-panel p-2 shadow-xl"
         >
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
-            Auto refresh
+            Auto-recarga
           </p>
+          <label
+            className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] text-gray-200 hover:bg-panel-2"
+          >
+            <input
+              type="checkbox"
+              checked={interval == null}
+              onChange={() => setInterval_(null)}
+              data-testid="auto-refresh-manual"
+            />
+            Manual
+          </label>
           {AUTO_REFRESH_OPTIONS.map((minutes) => (
             <label
               key={minutes}
@@ -66,11 +77,11 @@ export function AutoRefreshMenu() {
                 onChange={() => setInterval_(minutes)}
                 data-testid={`auto-refresh-${minutes}`}
               />
-              {minutes} min
+              {autoRefreshOptionLabel(minutes)}
             </label>
           ))}
           <p className="mt-1.5 border-t border-edge pt-1.5 text-[10px] text-muted">
-            {interval == null ? "Estado: Off" : `Cada ${interval} min`}
+            {interval == null ? "Estado: Manual" : autoRefreshOptionLabel(interval)}
             {lastRefreshedAt && (
               <span data-testid="last-refresh">
                 {" · Última: "}
