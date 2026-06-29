@@ -43,6 +43,8 @@ export interface CreateDrawingParams {
   label?: string;
   /** Datos extra de una caja LONG/SHORT_POSITION (cantidad, fees, notas…). */
   position?: PositionBoxData;
+  /** Línea horizontal: bloquea el precio (resize solo cambia el tiempo) + etiqueta obligatoria. */
+  horizontalLock?: boolean;
   /**
    * Si el color lo gobierna la temporalidad (legado) o si es un color FIJO
    * (p. ej. el estilo del PANEL). Por defecto se infiere (hay color explícito ⇒
@@ -109,6 +111,7 @@ export function createDrawing(params: CreateDrawingParams): Drawing {
       // Identidad de visibilidad = gráfica/slot (no la temporalidad).
       ...(params.chartSlotId ? { chartSlotId: params.chartSlotId } : {}),
       ...(params.position ? { position: params.position } : {}),
+      ...(params.horizontalLock ? { horizontalLock: true } : {}),
     },
     visible: true,
     locked: false,

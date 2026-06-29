@@ -64,6 +64,9 @@ export type DrawingTool =
   | "free_line"
   | "dotted_line"
   | "extended_trendline"
+  // Línea horizontal FINITA: clic A (precio/tiempo) + clic B (solo tiempo/largo).
+  // El precio de B se fuerza al de A. Se guarda como free_line con horizontalLock.
+  | "horizontal"
   | "rectangle"
   | "ellipse"
   | "eraser"
@@ -82,6 +85,7 @@ export const TWO_POINT_TOOLS: readonly TwoPointTool[] = [
   "free_line",
   "dotted_line",
   "extended_trendline",
+  "horizontal",
   "rectangle",
   "ellipse",
 ] as const;
@@ -127,6 +131,19 @@ export interface DrawingStyle {
   chartSlotId?: string;
   /** Datos extra de las cajas LONG/SHORT_POSITION (cantidad, fees, notas…). */
   position?: PositionBoxData;
+  /**
+   * Override por dibujo para mostrar/ocultar las etiquetas de precio en los
+   * extremos de una línea. Ausente/true = mostrar (controlado además por la
+   * preferencia global). Pasa por EstiloJSON sin requerir migración.
+   */
+  showEndpointPriceLabels?: boolean;
+  /**
+   * Marca de "línea horizontal": se guarda como free_line con los dos puntos al
+   * MISMO precio. Bloquea el precio al redimensionar (arrastrar un extremo solo
+   * cambia el tiempo) y fuerza la etiqueta de precio (obligatoria). Passthrough
+   * en EstiloJSON; sin migración.
+   */
+  horizontalLock?: boolean;
 }
 
 export interface Drawing {

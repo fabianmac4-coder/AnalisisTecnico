@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { IconButton } from "@/components/ui/IconButton";
 import { useDrawingStore } from "@/stores/drawingStore";
 import { useChartStore } from "@/stores/chartStore";
+import { useDrawingLabelStore } from "./drawingLabelStore";
 import type { DrawingTool } from "./drawingTypes";
 
 /** Icono de goma de borrar (trazo estilo lucide), inline para no sumar deps. */
@@ -32,6 +33,11 @@ const TOOLS: { tool: DrawingTool; label: string; icon: ReactNode }[] = [
   { tool: "free_line", label: "Línea libre (segmento A → B)", icon: "／" },
   { tool: "extended_trendline", label: "Trendline extendida (proyectada)", icon: "↗" },
   { tool: "dotted_line", label: "Línea punteada (segmento)", icon: "┄" },
+  {
+    tool: "horizontal",
+    label: "Línea horizontal: clic A (nivel de precio) + clic B (largo); muestra el precio",
+    icon: "─",
+  },
   { tool: "rectangle", label: "Zona / rectángulo", icon: "▭" },
   { tool: "ellipse", label: "Elipse / círculo", icon: "◯" },
   {
@@ -66,6 +72,8 @@ export function DrawingToolbar() {
   const removeDrawing = useDrawingStore((s) => s.removeDrawing);
   const clearForSymbol = useDrawingStore((s) => s.clearForSymbol);
   const activeSymbol = useChartStore((s) => s.activeSymbol);
+  const showPriceLabels = useDrawingLabelStore((s) => s.showPriceLabels);
+  const togglePriceLabels = useDrawingLabelStore((s) => s.toggle);
 
   const onClear = () => {
     if (!activeSymbol) return;
@@ -107,6 +115,14 @@ export function DrawingToolbar() {
       ))}
 
       <div className="my-1 h-px w-6 bg-edge" />
+
+      <IconButton
+        title="Mostrar precios en líneas"
+        active={showPriceLabels}
+        onClick={togglePriceLabels}
+      >
+        <span data-testid="toggle-price-labels" className="text-[11px] font-bold">$</span>
+      </IconButton>
 
       <IconButton
         title="Eliminar dibujo seleccionado (Supr)"

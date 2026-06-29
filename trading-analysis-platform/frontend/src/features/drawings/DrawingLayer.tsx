@@ -33,6 +33,13 @@ import {
   clipFreeLineSegmentToVisibleRange,
 } from "./drawingProjection";
 import { resolveDrawingColor, DEFAULT_TIMEFRAME_DRAWING_COLORS } from "./colors";
+import { useDrawingLabelStore } from "./drawingLabelStore";
+import {
+  formatDrawingPrice,
+  isEndpointVisible,
+  shouldShowPriceLabels,
+  PRICE_LABEL_LINE_TYPES,
+} from "./drawingPriceLabel";
 
 type MainSeries = ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area" | "Histogram">;
 type VisibleRange = { startMs: number; endMs: number } | null;
@@ -136,6 +143,8 @@ export function DrawingLayer({
   const selectedDrawingId = useDrawingStore((s) => s.selectedDrawingId);
   const setActiveTool = useDrawingStore((s) => s.setActiveTool);
   const openPositionEdit = usePositionBoxStore((s) => s.openEdit);
+  // Preferencia global: etiquetas de precio en los extremos de las líneas.
+  const showPriceLabels = useDrawingLabelStore((s) => s.showPriceLabels);
 
   const [interaction, setInteraction] = useState<Interaction>({ mode: "idle" });
   const interactionRef = useRef<Interaction>(interaction);
@@ -325,17 +334,24 @@ export function DrawingLayer({
         lineStyle = panel.lineStyle;
         usesTimeframeDefaultColor = false;
       }
+      // Línea horizontal: se guarda como free_line con AMBOS puntos al mismo
+      // precio (el de A); B solo aporta el tiempo (largo). Marca horizontalLock.
+      const isHorizontal = tool === "horizontal";
+      const finalPoints = isHorizontal
+        ? [points[0], { time: points[1].time, price: points[0].price }]
+        : points;
       const drawing = createDrawing({
         symbol,
         c030Id,
         sourceTimeframe,
-        type: tool,
-        points,
+        type: isHorizontal ? "free_line" : tool,
+        points: finalPoints,
         color,
         width,
         lineStyle,
         usesTimeframeDefaultColor,
         chartSlotId: slotId,
+        horizontalLock: isHorizontal,
       });
       await addDrawing(drawing);
     },
@@ -603,6 +619,15 @@ export function DrawingLayer({
               pointerPrice: dp.price,
             }),
           });
+        } else if (dragged?.style.horizontalLock) {
+          // Línea horizontal: arrastrar un extremo cambia SOLO el tiempo (largo);
+          // el precio queda fijo, así la línea sigue horizontal y su precio igual.
+          const points = drag.originalPoints.map((p) => ({ ...p }));
+          points[drag.endpointIndex] = {
+            time: dp.time,
+            price: drag.originalPoints[drag.endpointIndex].price,
+          };
+          setDraft({ id: drag.drawingId, points });
         } else {
           const points = drag.originalPoints.map((p) => ({ ...p }));
           points[drag.endpointIndex] = dp;
@@ -709,6 +734,7 @@ export function DrawingLayer({
             color: resolveDrawingColor(d, timeframeColors),
             visibleRange,
             ctx: convCtx,
+            showPriceLabels: shouldShowPriceLabels(d, showPriceLabels),
           })
         )
         .filter((el): el is JSX.Element => el !== null)
@@ -757,7 +783,8 @@ export function DrawingLayer({
       chart,
       mainSeries,
       visibleRange,
-      previewColor
+      previewColor,
+      showPriceLabels
     );
   }
 
@@ -982,6 +1009,8 @@ interface RenderOpts {
   color: string;
   visibleRange: VisibleRange;
   ctx: ConvCtx;
+  /** Etiquetas de precio en los extremos (ya resuelto por dibujo). */
+  showPriceLabels: boolean;
 }
 
 /**
@@ -1026,6 +1055,82 @@ function positionBoxLocal(
   };
 }
 
+/** Etiqueta de precio en un extremo (fondo + texto), no interactiva. */
+function priceLabelEl(
+  key: string,
+  lp: LocalPoint,
+  side: "left" | "right",
+  text: string,
+  color: string
+): JSX.Element {
+  const fontSize = 10;
+  const h = 14;
+  const w = Math.max(18, text.length * 6 + 6);
+  const x = side === "left" ? lp.x - w - 6 : lp.x + 6;
+  const y = lp.y - h / 2;
+  return (
+    <g key={key} pointerEvents="none" data-testid="drawing-price-label">
+      <rect
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rx={2}
+        fill="rgba(13,16,23,0.85)"
+        stroke={color}
+        strokeOpacity={0.5}
+        strokeWidth={0.75}
+      />
+      <text x={x + w / 2} y={y + h - 4} fill={color} fontSize={fontSize} textAnchor="middle">
+        {text}
+      </text>
+    </g>
+  );
+}
+
+/**
+ * Etiquetas de precio en los extremos A/B de una línea, usando el precio EXACTO
+ * de PuntosJSON (no el cierre de la vela). Solo si el extremo está a la vista.
+ */
+function endpointPriceLabels(
+  d: Drawing,
+  chart: IChartApi,
+  mainSeries: MainSeries,
+  size: { w: number; h: number },
+  ctx: ConvCtx,
+  color: string
+): JSX.Element[] {
+  const out: JSX.Element[] = [];
+  // Línea horizontal: UN solo rótulo junto al extremo DERECHO (mayor tiempo).
+  if (d.style.horizontalLock && d.points.length >= 2) {
+    const right =
+      d.points[1].time >= d.points[0].time ? d.points[1] : d.points[0];
+    if (!Number.isFinite(right.price)) return out;
+    const lp = toLocal(right, chart, mainSeries, ctx);
+    if (lp && isEndpointVisible(lp, size)) {
+      out.push(priceLabelEl(`pl-${d.id}-h`, lp, "right", formatDrawingPrice(right.price), color));
+    }
+    return out;
+  }
+  const n = Math.min(2, d.points.length);
+  for (let i = 0; i < n; i++) {
+    const p = d.points[i];
+    if (!p || !Number.isFinite(p.price)) continue;
+    const lp = toLocal(p, chart, mainSeries, ctx);
+    if (!lp || !isEndpointVisible(lp, size)) continue;
+    out.push(
+      priceLabelEl(
+        `pl-${d.id}-${i}`,
+        lp,
+        i === 0 ? "left" : "right",
+        formatDrawingPrice(p.price),
+        color
+      )
+    );
+  }
+  return out;
+}
+
 function renderDrawing(
   d: Drawing,
   chart: IChartApi,
@@ -1059,6 +1164,10 @@ function renderDrawing(
           {d.sourceTimeframe}
         </text>
       ) : null;
+    // Etiquetas de precio en los extremos (precios reales de PuntosJSON).
+    const priceLabels = opts.showPriceLabels
+      ? endpointPriceLabels(d, chart, mainSeries, size, opts.ctx, color)
+      : [];
     return (
       <g key={d.id}>
         <line
@@ -1073,6 +1182,7 @@ function renderDrawing(
         />
         {rawHandles(d.points)}
         {label}
+        {priceLabels}
       </g>
     );
   }
@@ -1246,17 +1356,46 @@ function renderPreview(
   chart: IChartApi,
   mainSeries: MainSeries,
   visibleRange: VisibleRange,
-  color: string
+  color: string,
+  showPriceLabels = false
 ): JSX.Element | null {
   const a = drawingPointToLocalPoint(first, chart, mainSeries);
   const b = drawingPointToLocalPoint(preview, chart, mainSeries);
   if (!a || !b) return null;
 
+  // Etiquetas de precio en vivo de los extremos del preview (A y B).
+  const labels =
+    showPriceLabels && PRICE_LABEL_LINE_TYPES.has(tool)
+      ? [
+          priceLabelEl("preview-a", a, "left", formatDrawingPrice(first.price), color),
+          priceLabelEl("preview-b", b, "right", formatDrawingPrice(preview.price), color),
+        ]
+      : null;
+  const withLabels = (line: JSX.Element): JSX.Element =>
+    labels ? (
+      <g>
+        {line}
+        {labels}
+      </g>
+    ) : (
+      line
+    );
+
   switch (tool) {
     case "free_line":
-      return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.9} />;
+      return withLabels(<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.9} />);
     case "dotted_line":
-      return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} strokeDasharray="2 4" opacity={0.9} />;
+      return withLabels(<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} strokeDasharray="2 4" opacity={0.9} />);
+    case "horizontal": {
+      // Preview SIEMPRE plano: B toma la y (precio) de A; etiqueta obligatoria.
+      const label = priceLabelEl("preview-h", { x: b.x, y: a.y }, "right", formatDrawingPrice(first.price), color);
+      return (
+        <g>
+          <line x1={a.x} y1={a.y} x2={b.x} y2={a.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.9} />
+          {label}
+        </g>
+      );
+    }
     case "extended_trendline": {
       // Preview proyectado al rango visible (como quedara al confirmar).
       if (visibleRange) {
@@ -1265,11 +1404,11 @@ function renderPreview(
           const pa = drawingPointToLocalPoint(proj[0], chart, mainSeries);
           const pb = drawingPointToLocalPoint(proj[1], chart, mainSeries);
           if (pa && pb) {
-            return <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.7} />;
+            return withLabels(<line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.7} />);
           }
         }
       }
-      return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.7} />;
+      return withLabels(<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} strokeDasharray="6 4" opacity={0.7} />);
     }
     case "rectangle": {
       const x = Math.min(a.x, b.x);
