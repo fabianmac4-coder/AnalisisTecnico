@@ -176,6 +176,27 @@ describe("línea horizontal", () => {
     expect(labels(container)).toHaveLength(1);
   });
 
+  it("dibujada de DERECHA a IZQUIERDA: una etiqueta junto al extremo derecho (mayor tiempo)", () => {
+    // A (time 90000 -> x=90) está a la DERECHA de B (time 40000 -> x=40).
+    const d = createDrawing({
+      symbol: "AAPL",
+      sourceTimeframe: "1Y_1D",
+      type: "free_line",
+      points: [
+        { time: 90000, price: 970 },
+        { time: 40000, price: 970 },
+      ],
+      horizontalLock: true,
+    });
+    const { container } = renderLayer([d]);
+    const els = labels(container);
+    expect(els).toHaveLength(1);
+    // La etiqueta se coloca a la derecha del extremo derecho (x≈96), NO del
+    // extremo izquierdo (x≈40) -> confirma que se recomputa el extremo derecho.
+    const rectX = Number(els[0].querySelector("rect")!.getAttribute("x"));
+    expect(rectX).toBeGreaterThan(50);
+  });
+
   it("la línea duplicada conserva horizontalLock y su etiqueta", () => {
     const dup = { ...horizontal(), id: "999", points: [
       { time: 50000, price: 980 },

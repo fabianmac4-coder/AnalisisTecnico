@@ -54,6 +54,12 @@ class DrawingStyle(BaseModel):
     # notas, moneda y contexto de la gráfica. Passthrough opaco (round-trip por
     # EstiloJSON). None para todos los demás tipos de dibujo.
     position: dict | None = None
+    # Etiquetas de precio en los extremos de las líneas (preferencia por dibujo
+    # del frontend). Passthrough por EstiloJSON; None = comportamiento por defecto.
+    showEndpointPriceLabels: bool | None = None
+    # Línea horizontal: precio bloqueado al redimensionar + etiqueta de precio
+    # ÚNICA y obligatoria. Se guarda como free_line con esta marca. Passthrough.
+    horizontalLock: bool | None = None
 
 
 class DrawingIn(BaseModel):

@@ -108,6 +108,52 @@ def test_chart_slot_id_roundtrips_and_listing_ignores_timeframe(client, db_sessi
     assert slots.count("chart_1") == 2
 
 
+def test_horizontal_lock_style_roundtrips(client, db_session):
+    """La línea horizontal (free_line + horizontalLock) conserva la marca en el
+    POST y en el GET; sin ella el front mostraría DOS etiquetas en vez de una."""
+    headers = _auth(client, db_session)
+    ws = _ws(client, headers)
+    payload = {
+        "symbol": "AAPL",
+        "c030Id": ws,
+        "sourceTimeframe": "1Y_1D",
+        "type": "free_line",
+        "points": [{"time": 1.0, "price": 184.25}, {"time": 2.0, "price": 184.25}],
+        "style": {"color": "#ffffff", "horizontalLock": True},
+        "visible": True,
+        "locked": False,
+        "showOnAllTimeframes": True,
+        "version": 3,
+    }
+    res = client.post("/api/drawings", json=payload, headers=headers)
+    assert res.status_code == 201, res.text
+    assert res.json()["style"]["horizontalLock"] is True
+    rows = client.get(
+        "/api/drawings", params={"symbol": "AAPL", "c030Id": ws}, headers=headers
+    ).json()
+    assert rows[0]["style"]["horizontalLock"] is True
+
+
+def test_show_endpoint_price_labels_roundtrips(client, db_session):
+    headers = _auth(client, db_session)
+    ws = _ws(client, headers)
+    payload = {
+        "symbol": "AAPL",
+        "c030Id": ws,
+        "sourceTimeframe": "1Y_1D",
+        "type": "free_line",
+        "points": [{"time": 1.0, "price": 1.0}, {"time": 2.0, "price": 2.0}],
+        "style": {"color": "#ffffff", "showEndpointPriceLabels": False},
+        "visible": True,
+        "locked": False,
+        "showOnAllTimeframes": True,
+        "version": 3,
+    }
+    res = client.post("/api/drawings", json=payload, headers=headers)
+    assert res.status_code == 201, res.text
+    assert res.json()["style"]["showEndpointPriceLabels"] is False
+
+
 # --------------------------------------------------------------------------
 # Aislamiento: no se crea/edita/borra la caja de otro usuario
 # --------------------------------------------------------------------------
